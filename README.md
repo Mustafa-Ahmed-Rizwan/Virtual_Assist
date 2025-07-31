@@ -61,7 +61,7 @@ Follow these steps to set up and run the project:
 6. **Create the Vector Database**
    Run the script to process scraped data and create the Chroma vector database:
    ```bash
-   python create_vectorstore_en.py
+   uv run create_vectorstore_en.py
    ```
 
 7. **Run the Application**
@@ -70,7 +70,7 @@ Follow these steps to set up and run the project:
    **Backend**:
    Open a terminal, navigate to the project root, and start the FastAPI server:
    ```bash
-   python main.py
+   uv run main.py
    ```
    The backend will run on `http://localhost:8000`.
 

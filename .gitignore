@@ -10,3 +10,7 @@ wheels/
 .venv
 
 .env
+
+# Vector database
+vector_db/
+

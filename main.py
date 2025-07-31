@@ -1,5 +1,7 @@
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+import asyncio
+from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_groq import ChatGroq
 from langchain_community.vectorstores import Chroma
@@ -39,7 +41,7 @@ app.add_middleware(
 
 # Initialize embeddings and vector store
 try:
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    embeddings = HuggingFaceEmbeddings( model_name="sentence-transformers/all-mpnet-base-v2")
     vectorstore = Chroma(
         persist_directory="vector_db",
         collection_name="arena2036_en",
@@ -52,7 +54,7 @@ except Exception as e:
 
 # Initialize LLM with optimized settings
 temperature = float(os.getenv("LLM_TEMPERATURE", 0.0))  # Deterministic by default
-max_tokens = int(os.getenv("LLM_MAX_TOKENS", 1000))
+max_tokens = int(os.getenv("LLM_MAX_TOKENS", 500))
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
     api_key=groq_api_key,
@@ -86,48 +88,14 @@ User Question: {question}
 Helpful Answer:"""
 )
 
-# Suggestions prompt template
-suggestions_prompt = PromptTemplate(
-    input_variables=["context"],
-    template="""Based on the Arena2036 documentation context, generate 5 diverse and commonly asked questions that users might want to ask about Arena2036. 
 
-Make the questions practical, specific, and cover different aspects like:
-- Setup and configuration
-- Features and functionality
-- Troubleshooting
-- Integration
-- Account management
-
-Context: {context}
-
-Provide exactly 5 questions in this JSON format:
-{{"suggestions": ["Question 1", "Question 2", "Question 3", "Question 4", "Question 5"]}}"""
-)
-
-# Related questions prompt template  
-related_questions_prompt = PromptTemplate(
-    input_variables=["context", "question"],
-    template="""Based on the user's question and the Arena2036 documentation context, generate 4 related questions that users might also want to ask.
-
-The related questions should be:
-1. Relevant to the original question topic
-2. Practical and actionable
-3. Cover adjacent or deeper topics
-4. Different from the original question
-
-User's Question: {question}
-Context: {context}
-
-Provide exactly 4 related questions in this JSON format:
-{{"related_questions": ["Related Question 1", "Related Question 2", "Related Question 3", "Related Question 4"]}}"""
-)
 
 # Configure retriever parameters tuned to your vector DB
 retriever = vectorstore.as_retriever(
     search_type="mmr",
     search_kwargs={
-        "k": 4,         # return top 4 chunks
-        "fetch_k": 8,   # consider top 8 for MMR
+        "k": 3,         # return top 4 chunks
+        "fetch_k": 5,   # consider top 8 for MMR
         "lambda_mult": 0.6
     }
 )
@@ -173,7 +141,29 @@ ENHANCED_SUGGESTIONS_DB = [
     ("How to enable two-factor authentication Arena2036?", 0.75),
     ("Arena2036 data synchronization issues", 0.7),
     ("How to invite team members to Arena2036?", 0.8),
-    ("Arena2036 file sharing permissions", 0.7)
+    ("Arena2036 file sharing permissions", 0.7),
+    # Website research topics
+    ("What is Wire Harness Automation and Standardization?", 0.8),
+    ("What is Industrial AI?", 0.8),
+    ("What is the Asset Administration Shell (AAS)?", 0.8),
+    ("What is the Industrial Metaverse?", 0.8),
+    ("What are Data Spaces?", 0.8),
+    ("Where can I find Arena2036 publications?", 0.7),
+    # Project names
+    ("What is the Well-defined Research Campus Initiative?", 0.7),
+    ("What is CARpulse?", 0.7),
+    ("What is EcoFrame?", 0.7),
+    ("What is Connect4HCA?", 0.7),
+    ("What is ARENA2036-X?", 0.7),
+    ("What is the Network infrastructure for Industry 4.0?", 0.7),
+    ("What is Catena-X?", 0.7),
+    ("What is DigiTain?", 0.7),
+    ("What is the Interactive Bosch floor?", 0.7),
+    ("What is the Wire Harness standardization initiative?", 0.7),
+    ("What is the Transformation hub for the Wire Harness?", 0.7),
+    ("What is the Asset Administration Shell for the Wire Harness?", 0.7),
+    ("How to view all Arena2036 projects?", 0.6),
+    ("How to view completed Arena2036 projects?", 0.6)
 ]
 
 # Initialize optimized trie
@@ -200,21 +190,49 @@ async def health_check():
     return {"status": "healthy"}
 
 @app.get("/query")
-async def query_assistant(question: str):
+async def query_assistant(request: Request, question: str):
     try:
         logger.info(f"Query: {question}")
-        res = qa_chain({"query": question})
+        
+        # Check if client disconnected
+        if await request.is_disconnected():
+            logger.info("Client disconnected, aborting query")
+            return {"error": "Request aborted"}
+        
+        # Create a timeout for the LLM call
+        async def run_qa_chain():
+            return qa_chain({"query": question})
+        
+        try:
+            # Run with timeout and check for disconnection
+            res = await asyncio.wait_for(run_qa_chain(), timeout=60.0)
+            
+            # Check again if client disconnected during processing
+            if await request.is_disconnected():
+                logger.info("Client disconnected during processing")
+                return {"error": "Request aborted"}
+                
+        except asyncio.TimeoutError:
+            logger.warning(f"Query timeout for: {question}")
+            raise HTTPException(status_code=504, detail="Request timeout")
+        
         answer = res["result"]
         docs = res.get("source_documents", [])[:3]
 
         sources = []
+        seen_urls = set()
         for doc in docs:
             url = doc.metadata.get("url", "")
             title = doc.metadata.get("title", "Resource")
-            if url:
+            if url and url not in seen_urls:
                 sources.append({"url": url, "title": title})
+                seen_urls.add(url)
 
         return {"answer": answer, "sources": sources}
+        
+    except asyncio.CancelledError:
+        logger.info("Query cancelled by client")
+        return {"error": "Request cancelled"}
     except Exception as e:
         logger.error(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -244,22 +262,38 @@ async def get_suggestions(q: str = "", limit: int = 20):
             "error": "Using fallback suggestions"
         }
 
-@app.get("/related-questions")
-async def get_related_questions(question: str):
+
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+
+# Precompute embeddings for suggestions (cache at startup)
+_suggestion_texts = [item[0] for item in ENHANCED_SUGGESTIONS_DB]
+_suggestion_embeddings = None
+def get_suggestion_embeddings():
+    global _suggestion_embeddings
+    if _suggestion_embeddings is None:
+        _suggestion_embeddings = embeddings.embed_documents(_suggestion_texts)
+    return _suggestion_embeddings
+
+def get_top_related_questions(user_question: str, limit: int = 4):
     try:
-        docs = vectorstore.similarity_search(question, k=3)
-        context = "\n\n".join([doc.page_content[:400] for doc in docs])
-        response = llm.generate(related_questions_prompt.format(context=context, question=question))
-        data = json.loads(response[0].text)
-        return data
-    except Exception:
-        fallback = [
-            "How do I manage Arena2036 notifications?",
-            "What are the Arena2036 collaboration features?", 
-            "How do I integrate third-party tools with Arena2036?",
-            "How do I export data from Arena2036?"
-        ]
-        return {"related_questions": random.sample(fallback, 4)}
+        user_emb = embeddings.embed_query(user_question)
+        sugg_embs = get_suggestion_embeddings()
+        # Compute cosine similarity
+        sims = cosine_similarity([user_emb], sugg_embs)[0]
+        # Get indices of top N
+        top_idx = np.argsort(sims)[::-1][:limit]
+        return [_suggestion_texts[i] for i in top_idx]
+    except Exception as e:
+        logger.error(f"Related question similarity error: {str(e)}")
+        # Fallback: return top suggestions
+        return _suggestion_texts[:limit]
+
+@app.get("/related-questions")
+async def get_related_questions(question: str, limit: int = 4):
+    """Return related questions most similar to the user's question using embeddings."""
+    related = get_top_related_questions(question, limit)
+    return {"related_questions": related}
 
 if __name__ == "__main__":
     import uvicorn

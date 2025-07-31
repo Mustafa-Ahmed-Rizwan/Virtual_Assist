@@ -1,22 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Add this in the head section -->
-    <base href="/">
     <title>Arena2036 Help Center</title>
     <link rel="stylesheet" href="styles.css">
-    <!-- Markdown rendering library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.2/marked.min.js"></script>
-    <!-- Syntax highlighting for code blocks -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.0.0/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github.min.css">
+    <script src="script.js"></script>
 </head>
-
 <body>
-    <!-- Header -->
     <header class="header">
         <div class="header-container">
             <div class="logo">
@@ -26,92 +20,51 @@
         </div>
     </header>
 
-    <!-- Main Content -->
     <main class="main">
-        <!-- Hero Section -->
         <section class="hero" id="heroSection">
             <div class="hero-container">
                 <h1 class="hero-title">How can we help?</h1>
                 <div class="search-container">
                     <div class="search-wrapper">
                         <span class="search-icon">🔍</span>
-                        <input type="text" id="searchInput" placeholder="Ask anything about Arena2036..."
-                            class="search-input" autocomplete="off" autocapitalize="off" autocorrect="off"
-                            spellcheck="false">
-                        <button id="searchButton" class="search-button">
-                            <span>↵</span>
-                        </button>
+                        <input type="text" id="searchInput" placeholder="Search for answers..." class="search-input" autocomplete="off" autocapitalize="on" autocorrect="on" spellcheck="true">
+                        <button id="searchButton" class="search-button">↵</button>
                     </div>
                 </div>
 
-                <!-- Quick Help Options -->
                 <div class="quick-help" id="quickHelpContainer">
-                    <!-- Loading state for quick help -->
-                    <div id="quickHelpLoading" class="quick-help-loading">
-                        <div class="loading-spinner-small"></div>
-                        <span>Loading suggestions...</span>
+                    <div id="quickHelpLoading" class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <p class="loading-text">Loading suggestions...</p>
                     </div>
-                    <!-- Dynamic help tags will be inserted here -->
                 </div>
             </div>
         </section>
 
-        <!-- Answer Section -->
-        <section class="answer-section" id="answerSection" style="display: none;">
-            <div class="answer-container">
-                <!-- Back to Search Button -->
-                <button id="backButton" class="back-button">
-                    <span class="back-icon">←</span>
-                    Back to search
-                </button>
-
-                <!-- Question Display -->
-                <div class="question-display" id="questionDisplay"></div>
-
-                <!-- Answer Card -->
-                <div class="answer-card">
-                    <div class="answer-header">
-                        <span class="answer-icon">✨</span>
-                        <span class="answer-label">Answer</span>
-                    </div>
-
-                    <!-- Loading State -->
-                    <div id="loadingState" class="loading-state">
-                        <div class="loading-spinner"></div>
-                        <p class="loading-text">Finding the best answer for you...</p>
-                    </div>
-
-                    <!-- Answer Content -->
-                    <div id="answerContent" class="answer-content" style="display: none;"></div>
-
-                    <!-- Sources -->
-                    <div id="sourcesSection" class="sources-section" style="display: none;">
-                        <h4 class="sources-title">Sources</h4>
-                        <div id="sourcesList" class="sources-list"></div>
-                    </div>
-
-                    <!-- Feedback -->
-                    <div class="answer-feedback" id="feedbackSection" style="display: none;">
-                        <span class="feedback-text">Was this answer helpful?</span>
-                        <div class="feedback-buttons">
-                            <button class="feedback-btn feedback-yes" id="feedbackYes">👍</button>
-                            <button class="feedback-btn feedback-no" id="feedbackNo">👎</button>
-                        </div>
+        <!-- Chat Flow Container -->
+        <section class="chat-flow" id="chatFlow" style="display: none;">
+            <div class="chat-container">
+                <div id="conversationHistory" class="conversation-history"></div>
+                
+                <!-- Fixed Chat Input at Bottom -->
+                <div class="fixed-chat-input">
+                    <div class="chat-input-container">
+                        <input type="text" id="chatInput" placeholder="Ask a follow-up question..." class="chat-input">
+                        <button id="chatSendButton" class="chat-send-button">
+                            <svg viewBox="0 0 24 24" width="20" height="20">
+                                <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
+                            </svg>
+                        </button>
                     </div>
                 </div>
 
                 <!-- Related Questions Section -->
                 <div id="relatedQuestionsSection" class="related-questions-section" style="display: none;">
                     <h3 class="related-title">You can also ask</h3>
-                    <div id="relatedQuestionsList" class="related-questions-list">
-                        <!-- Dynamic related questions will be inserted here -->
-                    </div>
+                    <div id="relatedQuestionsList" class="related-questions-list"></div>
                 </div>
             </div>
         </section>
     </main>
-
-    <script src="script.js"></script>
 </body>
-
 </html>

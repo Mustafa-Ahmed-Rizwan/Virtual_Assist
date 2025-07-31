@@ -3,18 +3,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const searchInput = document.getElementById("searchInput");
     const searchButton = document.getElementById("searchButton");
     const heroSection = document.getElementById("heroSection");
-    const answerSection = document.getElementById("answerSection");
-    const backButton = document.getElementById("backButton");
-    const questionDisplay = document.getElementById("questionDisplay");
-    const loadingState = document.getElementById("loadingState");
-    const answerContent = document.getElementById("answerContent");
-    const sourcesSection = document.getElementById("sourcesSection");
-    const sourcesList = document.getElementById("sourcesList");
-    const feedbackSection = document.getElementById("feedbackSection");
-    const relatedQuestionsSection = document.getElementById("relatedQuestionsSection");
-    const relatedQuestionsList = document.getElementById("relatedQuestionsList");
+    const chatFlow = document.getElementById("chatFlow");
+    const conversationHistory = document.getElementById("conversationHistory");
     const quickHelpContainer = document.getElementById("quickHelpContainer");
     const quickHelpLoading = document.getElementById("quickHelpLoading");
+    const chatInput = document.getElementById("chatInput");
+    const chatSendButton = document.getElementById("chatSendButton");
+    const relatedQuestionsSection = document.getElementById("relatedQuestionsSection");
+    const relatedQuestionsList = document.getElementById("relatedQuestionsList");
 
     // State variables
     let suggestionTimeout;
@@ -22,6 +18,13 @@ document.addEventListener("DOMContentLoaded", () => {
     let selectedSuggestionIndex = -1;
     let suggestionsVisible = false;
     let virtualList = null;
+    let messageCounter = 0;
+    let chatSuggestionsVisible = false;
+    let chatSelectedSuggestionIndex = -1;
+    let currentChatSuggestions = [];
+    let chatVirtualList = null;
+    let isAnswerLoading = false;
+    let currentAbortController = null;
 
     // Configure marked
     marked.setOptions({
@@ -169,7 +172,7 @@ document.addEventListener("DOMContentLoaded", () => {
         constructor(container) {
             this.container = container;
             this.itemHeight = 44;
-            this.visibleCount = Math.min(8, Math.floor(300 / this.itemHeight)); // Max 300px height
+            this.visibleCount = Math.min(8, Math.floor(300 / this.itemHeight));
             this.scrollTop = 0;
             this.data = [];
             this.selectedIndex = -1;
@@ -184,7 +187,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
 
-            // Use virtual scrolling only for large lists
             if (suggestions.length <= 10) {
                 this.renderDirect(suggestions, selectedIndex);
                 return;
@@ -192,7 +194,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             const totalHeight = suggestions.length * this.itemHeight;
             const startIndex = Math.floor(this.scrollTop / this.itemHeight);
-            const endIndex = Math.min(startIndex + this.visibleCount + 2, suggestions.length); // +2 for buffer
+            const endIndex = Math.min(startIndex + this.visibleCount + 2, suggestions.length);
             
             const visibleItems = suggestions.slice(startIndex, endIndex);
             
@@ -203,8 +205,8 @@ document.addEventListener("DOMContentLoaded", () => {
                             const actualIndex = startIndex + index;
                             const isSelected = actualIndex === selectedIndex;
                             return `<div class="suggestion-item ${isSelected ? 'selected' : ''}" 
-                                         data-index="${actualIndex}" 
-                                         style="height: ${this.itemHeight}px; line-height: ${this.itemHeight}px;">
+                                        data-index="${actualIndex}" 
+                                        style="height: ${this.itemHeight}px; line-height: ${this.itemHeight}px;">
                                         <span class="suggestion-icon">🔍</span>
                                         <span class="suggestion-text">${this.highlightMatch(suggestion, searchInput.value)}</span>
                                     </div>`;
@@ -218,7 +220,7 @@ document.addEventListener("DOMContentLoaded", () => {
             this.container.innerHTML = suggestions.map((suggestion, index) => {
                 const isSelected = index === selectedIndex;
                 return `<div class="suggestion-item ${isSelected ? 'selected' : ''}" 
-                             data-index="${index}">
+                            data-index="${index}">
                             <span class="suggestion-icon">🔍</span>
                             <span class="suggestion-text">${this.highlightMatch(suggestion, searchInput.value)}</span>
                         </div>`;
@@ -233,7 +235,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         handleScroll(scrollTop) {
-            if (this.data.length <= 10) return; // No virtual scrolling for small lists
+            if (this.data.length <= 10) return;
             
             this.scrollTop = scrollTop;
             this.render(this.data, this.selectedIndex);
@@ -243,7 +245,6 @@ document.addEventListener("DOMContentLoaded", () => {
             this.selectedIndex = newIndex;
             this.render(this.data, newIndex);
             
-            // Scroll to keep selected item visible
             if (this.data.length > 10) {
                 const itemTop = newIndex * this.itemHeight;
                 const itemBottom = itemTop + this.itemHeight;
@@ -268,7 +269,6 @@ document.addEventListener("DOMContentLoaded", () => {
     // Main functions
     async function loadQuickHelpSuggestions() {
         try {
-            // Try cache first
             const cachedSuggestions = await cache.get('');
             if (cachedSuggestions && cachedSuggestions.length > 0) {
                 renderQuickHelp(cachedSuggestions.slice(0, 5));
@@ -307,38 +307,100 @@ document.addEventListener("DOMContentLoaded", () => {
         
         quickHelpContainer.querySelectorAll('.help-tag').forEach(tag => {
             tag.addEventListener("click", () => {
-                fetchAnswer(tag.dataset.question);
+                startChatFlow(tag.dataset.question);
             });
         });
     }
 
-    async function loadAutocompleteSuggestions(query) {
+
+    // Unified autocomplete handler
+    async function loadUnifiedAutocomplete({
+        query,
+        inputType // 'search' or 'chat'
+    }) {
         if (query.length < 1) {
-            hideSuggestions();
+            if (inputType === 'search') hideSuggestions();
+            else hideChatSuggestions();
             return;
         }
 
         try {
-            // Check cache first
-            const cachedSuggestions = await cache.get(query);
-            if (cachedSuggestions) {
-                showAutocompleteSuggestions(cachedSuggestions);
-                return;
-            }
-
-            const response = await fetch(`http://localhost:8000/suggestions?q=${encodeURIComponent(query)}&limit=20`);
-            
-            if (response.ok) {
-                const data = await response.json();
-                
-                // Cache the results
-                await cache.set(query, data.suggestions);
-                
-                showAutocompleteSuggestions(data.suggestions);
+            let suggestions = null;
+            if (inputType === 'search') {
+                const cachedSuggestions = await cache.get(query);
+                if (cachedSuggestions) {
+                    suggestions = cachedSuggestions;
+                } else {
+                    const response = await fetch(`http://localhost:8000/suggestions?q=${encodeURIComponent(query)}&limit=20`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        await cache.set(query, data.suggestions);
+                        suggestions = data.suggestions;
+                    }
+                }
+                showUnifiedAutocompleteSuggestions(suggestions || [], 'search');
+            } else {
+                // chat input does not use cache
+                const response = await fetch(`http://localhost:8000/suggestions?q=${encodeURIComponent(query)}&limit=20`);
+                if (response.ok) {
+                    const data = await response.json();
+                    suggestions = data.suggestions;
+                }
+                showUnifiedAutocompleteSuggestions(suggestions || [], 'chat');
             }
         } catch (error) {
             console.error("Error loading autocomplete suggestions:", error);
-            hideSuggestions();
+            if (inputType === 'search') hideSuggestions();
+            else hideChatSuggestions();
+        }
+    }
+
+    // Unified show suggestions
+    function showUnifiedAutocompleteSuggestions(suggestions, inputType) {
+        if (inputType === 'search') {
+            if (suggestions.length === 0) {
+                hideSuggestions();
+                return;
+            }
+            currentSuggestions = suggestions;
+            selectedSuggestionIndex = -1;
+            let suggestionsDropdown = document.getElementById('suggestionsDropdown');
+            if (!suggestionsDropdown) {
+                suggestionsDropdown = document.createElement('div');
+                suggestionsDropdown.id = 'suggestionsDropdown';
+                suggestionsDropdown.className = 'suggestions-dropdown';
+                document.querySelector('.search-wrapper').appendChild(suggestionsDropdown);
+                virtualList = new VirtualSuggestionsList(suggestionsDropdown);
+                suggestionsDropdown.addEventListener('scroll', (e) => {
+                    virtualList.handleScroll(e.target.scrollTop);
+                });
+                suggestionsDropdown.addEventListener('click', handleSuggestionClick);
+            }
+            virtualList.render(suggestions);
+            suggestionsDropdown.style.display = 'block';
+            suggestionsVisible = true;
+        } else {
+            if (suggestions.length === 0 || isAnswerLoading) {
+                hideChatSuggestions();
+                return;
+            }
+            currentChatSuggestions = suggestions;
+            chatSelectedSuggestionIndex = -1;
+            let chatSuggestionsDropdown = document.getElementById('chatSuggestionsDropdown');
+            if (!chatSuggestionsDropdown) {
+                chatSuggestionsDropdown = document.createElement('div');
+                chatSuggestionsDropdown.id = 'chatSuggestionsDropdown';
+                chatSuggestionsDropdown.className = 'chat-suggestions-dropdown';
+                document.querySelector('.chat-input-container').appendChild(chatSuggestionsDropdown);
+                chatVirtualList = new VirtualSuggestionsList(chatSuggestionsDropdown);
+                chatSuggestionsDropdown.addEventListener('scroll', (e) => {
+                    chatVirtualList.handleScroll(e.target.scrollTop);
+                });
+                chatSuggestionsDropdown.addEventListener('click', handleChatSuggestionClick);
+            }
+            chatVirtualList.render(suggestions);
+            chatSuggestionsDropdown.style.display = 'block';
+            chatSuggestionsVisible = true;
         }
     }
 
@@ -359,21 +421,49 @@ document.addEventListener("DOMContentLoaded", () => {
             suggestionsDropdown.className = 'suggestions-dropdown';
             document.querySelector('.search-wrapper').appendChild(suggestionsDropdown);
             
-            // Initialize virtual list
             virtualList = new VirtualSuggestionsList(suggestionsDropdown);
             
-            // Add scroll listener for virtual scrolling
             suggestionsDropdown.addEventListener('scroll', (e) => {
                 virtualList.handleScroll(e.target.scrollTop);
             });
             
-            // Add click listener
             suggestionsDropdown.addEventListener('click', handleSuggestionClick);
         }
         
         virtualList.render(suggestions);
         suggestionsDropdown.style.display = 'block';
         suggestionsVisible = true;
+    }
+
+    function showChatAutocompleteSuggestions(suggestions) {
+        if (suggestions.length === 0 || isAnswerLoading) {
+            hideChatSuggestions();
+            return;
+        }
+
+        currentChatSuggestions = suggestions;
+        chatSelectedSuggestionIndex = -1;
+        
+        let chatSuggestionsDropdown = document.getElementById('chatSuggestionsDropdown');
+        
+        if (!chatSuggestionsDropdown) {
+            chatSuggestionsDropdown = document.createElement('div');
+            chatSuggestionsDropdown.id = 'chatSuggestionsDropdown';
+            chatSuggestionsDropdown.className = 'chat-suggestions-dropdown';
+            document.querySelector('.chat-input-container').appendChild(chatSuggestionsDropdown);
+            
+            chatVirtualList = new VirtualSuggestionsList(chatSuggestionsDropdown);
+            
+            chatSuggestionsDropdown.addEventListener('scroll', (e) => {
+                chatVirtualList.handleScroll(e.target.scrollTop);
+            });
+            
+            chatSuggestionsDropdown.addEventListener('click', handleChatSuggestionClick);
+        }
+        
+        chatVirtualList.render(suggestions);
+        chatSuggestionsDropdown.style.display = 'block';
+        chatSuggestionsVisible = true;
     }
 
     function hideSuggestions() {
@@ -385,6 +475,15 @@ document.addEventListener("DOMContentLoaded", () => {
         selectedSuggestionIndex = -1;
     }
 
+    function hideChatSuggestions() {
+        const chatSuggestionsDropdown = document.getElementById('chatSuggestionsDropdown');
+        if (chatSuggestionsDropdown) {
+            chatSuggestionsDropdown.style.display = 'none';
+        }
+        chatSuggestionsVisible = false;
+        chatSelectedSuggestionIndex = -1;
+    }
+
     function handleSuggestionClick(e) {
         const item = e.target.closest('.suggestion-item');
         if (item) {
@@ -392,7 +491,19 @@ document.addEventListener("DOMContentLoaded", () => {
             const suggestion = currentSuggestions[index];
             searchInput.value = suggestion;
             hideSuggestions();
-            fetchAnswer(suggestion);
+            startChatFlow(suggestion);
+        }
+    }
+
+    function handleChatSuggestionClick(e) {
+        const item = e.target.closest('.suggestion-item');
+        if (item) {
+            const index = parseInt(item.dataset.index);
+            const suggestion = currentChatSuggestions[index];
+            chatInput.value = suggestion;
+            hideChatSuggestions();
+            addChatMessage(suggestion);
+            chatInput.value = '';
         }
     }
 
@@ -419,60 +530,198 @@ document.addEventListener("DOMContentLoaded", () => {
             const selectedSuggestion = currentSuggestions[selectedSuggestionIndex];
             searchInput.value = selectedSuggestion;
             hideSuggestions();
-            fetchAnswer(selectedSuggestion);
+            startChatFlow(selectedSuggestion);
         } else if (e.key === 'Escape') {
             hideSuggestions();
             searchInput.value = searchInput.dataset.originalValue || '';
         }
     }
 
-    // Core functionality
-    const showAnswerSection = (question) => {
-        questionDisplay.textContent = question;
+    function handleChatSuggestionKeyboard(e) {
+        if (!chatSuggestionsVisible || currentChatSuggestions.length === 0) return;
+        
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            chatSelectedSuggestionIndex = Math.min(chatSelectedSuggestionIndex + 1, currentChatSuggestions.length - 1);
+            chatVirtualList.updateSelection(chatSelectedSuggestionIndex);
+            chatInput.value = currentChatSuggestions[chatSelectedSuggestionIndex];
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            chatSelectedSuggestionIndex = Math.max(chatSelectedSuggestionIndex - 1, -1);
+            if (chatSelectedSuggestionIndex >= 0) {
+                chatVirtualList.updateSelection(chatSelectedSuggestionIndex);
+                chatInput.value = currentChatSuggestions[chatSelectedSuggestionIndex];
+            } else {
+                chatVirtualList.updateSelection(-1);
+                chatInput.value = chatInput.dataset.originalValue || '';
+            }
+        } else if (e.key === 'Enter' && chatSelectedSuggestionIndex >= 0) {
+            e.preventDefault();
+            const selectedSuggestion = currentChatSuggestions[chatSelectedSuggestionIndex];
+            chatInput.value = selectedSuggestion;
+            hideChatSuggestions();
+            addChatMessage(selectedSuggestion);
+            chatInput.value = '';
+        } else if (e.key === 'Escape') {
+            hideChatSuggestions();
+            chatInput.value = chatInput.dataset.originalValue || '';
+        }
+    }
+
+    // Core chat flow functionality
+    function startChatFlow(question) {
+        // Hide hero section and show chat flow
         heroSection.style.display = "none";
-        answerSection.style.display = "block";
+        chatFlow.style.display = "block";
         
-        loadingState.style.display = "flex";
-        answerContent.style.display = "none";
-        sourcesSection.style.display = "none";
-        feedbackSection.style.display = "none";
-        relatedQuestionsSection.style.display = "none";
+        // Create and add new message
+        addChatMessage(question);
         
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        // Focus chat input and scroll to bottom
+        setTimeout(() => {
+            chatInput.focus();
+            scrollToBottom();
+        }, 100);
+    }
+
+    function addChatMessage(question) {
+        if (isAnswerLoading) return; // Importance: Prevent new messages during loading
+        
+        messageCounter++;
+        const messageId = `message-${messageCounter}`;
+        
+        // Importance: Set loading state
+        isAnswerLoading = true;
+        updateInputStates();
+        
+        // Create message container
+        const messageElement = document.createElement('div');
+        messageElement.className = 'chat-message';
+        messageElement.id = messageId;
+        
+        // Initial message structure with loading
+        messageElement.innerHTML = `
+            <div class="question-display">${question}</div>
+            <div class="answer-section">
+                <div class="answer-header">
+                    <span class="answer-icon">✨</span>
+                    <span class="answer-label">Answer</span>
+                    <button class="stop-generation-btn" onclick="stopGeneration('${messageId}')">
+                        <svg viewBox="0 0 24 24" width="16" height="16">
+                            <rect x="8" y="8" width="8" height="8" fill="currentColor" rx="2"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="loading-state">
+                    <div class="loading-spinner"></div>
+                    <p class="loading-text">Finding the best answer for you...</p>
+                </div>
+            </div>
+        `;
+        
+        // Add to conversation history
+        conversationHistory.appendChild(messageElement);
+        
+        // Fetch answer
+        fetchAnswerForMessage(question, messageId);
+        
+        // Scroll to new message
+        setTimeout(() => {
+            scrollToBottom();
+        }, 100);
+    }
+
+    const fetchAnswerForMessage = async (question, messageId) => {
+        const messageElement = document.getElementById(messageId);
+        const answerSection = messageElement.querySelector('.answer-section');
+        
+        // Importance: Create abort controller for this request
+        currentAbortController = new AbortController();
+        
+        try {
+            const response = await fetch(`http://localhost:8000/query?question=${encodeURIComponent(question)}`, {
+                signal: currentAbortController.signal
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            // Update message with answer
+            renderAnswerInMessage(answerSection, data.answer, data.sources, question);
+            
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                renderAnswerInMessage(answerSection, "## Answer Stopped\n\nGeneration was stopped by user.", [], question);
+            } else {
+                console.error("Error:", error);
+                
+                let errorMessage = "I'm having trouble connecting right now. Please try again in a moment.";
+                
+                if (error.message.includes('Failed to fetch')) {
+                    errorMessage = "Unable to connect to the server. Please check your connection and try again.";
+                } else if (error.message.includes('500')) {
+                    errorMessage = "The server is experiencing issues. Please try again later.";
+                }
+                
+                renderAnswerInMessage(answerSection, `## Error\n\n${errorMessage}`, [], question);
+            }
+        } finally {
+            // Importance: Reset loading state
+            isAnswerLoading = false;
+            currentAbortController = null;
+            updateInputStates();
+        }
     };
 
-    const showHeroSection = () => {
-        heroSection.style.display = "block";
-        answerSection.style.display = "none";
-        searchInput.value = "";
-        searchInput.focus();
-    };
-
-    const renderMarkdownAnswer = (markdownText) => {
+    function renderAnswerInMessage(answerSection, markdownText, sources, question) {
         const htmlContent = marked.parse(markdownText);
-        answerContent.innerHTML = htmlContent;
         
-        answerContent.querySelectorAll('pre code').forEach((block) => {
+        // Create answer content
+        const answerContentHtml = `
+            <div class="answer-header">
+                <span class="answer-icon">✨</span>
+                <span class="answer-label">Answer</span>
+            </div>
+            <div class="answer-content">${htmlContent}</div>
+            ${sources && sources.length > 0 ? `
+                <div class="sources-section">
+                    <h4 class="sources-title">Sources</h4>
+                    <div class="sources-list">
+                        ${sources.map(source => `
+                            <a href="${source.url}" target="_blank" rel="noopener noreferrer" class="source-item">
+                                <span class="source-icon">🔗</span>
+                                <span class="source-title">${source.title || 'Source'}</span>
+                            </a>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : ''}
+            <div class="answer-feedback">
+                <span class="feedback-text">Was this answer helpful?</span>
+                <div class="feedback-buttons">
+                    <button class="feedback-btn feedback-yes" onclick="handleFeedback(this, true)">👍</button>
+                    <button class="feedback-btn feedback-no" onclick="handleFeedback(this, false)">👎</button>
+                </div>
+            </div>
+        `;
+        
+        answerSection.innerHTML = answerContentHtml;
+        
+        // Highlight code blocks
+        answerSection.querySelectorAll('pre code').forEach((block) => {
             hljs.highlightElement(block);
         });
         
-        loadingState.style.display = "none";
-        answerContent.style.display = "block";
-        feedbackSection.style.display = "flex";
-        relatedQuestionsSection.style.display = "block";
-    };
-
-    const renderSources = (sources) => {
-        if (sources && sources.length > 0) {
-            sourcesList.innerHTML = sources.map(source => `
-                <a href="${source.url}" target="_blank" rel="noopener noreferrer" class="source-item">
-                    <span class="source-icon">🔗</span>
-                    <span class="source-title">${source.title || 'Source'}</span>
-                </a>
-            `).join('');
-            sourcesSection.style.display = "block";
+        // Load related questions for the first message only
+        if (conversationHistory.children.length === 1) {
+            loadRelatedQuestions(question);
         }
-    };
+        
+        scrollToBottom();
+    }
 
     async function loadRelatedQuestions(currentQuestion) {
         try {
@@ -506,56 +755,86 @@ document.addEventListener("DOMContentLoaded", () => {
         ).join('');
         
         relatedQuestionsList.innerHTML = relatedQuestionsHTML;
+        relatedQuestionsSection.style.display = "block";
         
-        relatedQuestionsList.querySelectorAll('.related-question').forEach(question => {
-            question.addEventListener("click", () => {
-                fetchAnswer(question.dataset.question);
+        relatedQuestionsList.querySelectorAll('.related-question').forEach(questionBtn => {
+            questionBtn.addEventListener("click", () => {
+                addChatMessage(questionBtn.dataset.question);
+                chatInput.value = '';
             });
         });
     }
 
-    const fetchAnswer = async (question) => {
-        showAnswerSection(question);
-        
-        try {
-            const response = await fetch(`http://localhost:8000/query?question=${encodeURIComponent(question)}`);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const data = await response.json();
-            
-            renderMarkdownAnswer(data.answer);
-            renderSources(data.sources);
-            loadRelatedQuestions(question);
-            
-        } catch (error) {
-            console.error("Error:", error);
-            
-            let errorMessage = "I'm having trouble connecting right now. Please try again in a moment.";
-            
-            if (error.message.includes('Failed to fetch')) {
-                errorMessage = "Unable to connect to the server. Please check your connection and try again.";
-            } else if (error.message.includes('500')) {
-                errorMessage = "The server is experiencing issues. Please try again later.";
-            }
-            
-            renderMarkdownAnswer(`## Error\n\n${errorMessage}`);
+    function scrollToBottom() {
+        setTimeout(() => {
+            window.scrollTo({
+                top: document.body.scrollHeight,
+                behavior: 'smooth'
+            });
+        }, 50);
+    }
+
+    function stopGeneration(messageId) {
+        if (currentAbortController) {
+            currentAbortController.abort();
         }
+        
+        // Hide stop button
+        const stopBtn = document.querySelector(`#${messageId} .stop-generation-btn`);
+        if (stopBtn) {
+            stopBtn.style.display = 'none';
+        }
+    }
+
+    function updateInputStates() {
+        const searchInputContainer = document.querySelector('.search-wrapper');
+        const chatInputContainer = document.querySelector('.chat-input-container');
+        
+        if (isAnswerLoading) {
+            searchInput.disabled = true;
+            chatInput.disabled = true;
+            searchButton.disabled = true;
+            chatSendButton.disabled = true;
+            
+            searchInputContainer.classList.add('disabled');
+            chatInputContainer.classList.add('disabled');
+            
+            chatInput.placeholder = "Please wait for the current answer to complete...";
+            
+            // Hide chat suggestions during loading
+            hideChatSuggestions();
+        } else {
+            searchInput.disabled = false;
+            chatInput.disabled = false;
+            searchButton.disabled = false;
+            chatSendButton.disabled = false;
+            
+            searchInputContainer.classList.remove('disabled');
+            chatInputContainer.classList.remove('disabled');
+            
+            chatInput.placeholder = "Ask a follow-up question...";
+        }
+    }
+
+    // Global feedback handler
+    window.handleFeedback = function(button, isPositive) {
+        const feedbackButtons = button.parentNode;
+        feedbackButtons.querySelectorAll('.feedback-btn').forEach(btn => btn.classList.remove('active'));
+        button.classList.add('active');
     };
+
+    // Make stopGeneration function global
+    window.stopGeneration = stopGeneration;
 
     // Event listeners
     searchInput.addEventListener("input", (e) => {
         const query = e.target.value.trim();
         searchInput.dataset.originalValue = query;
-        
         if (suggestionTimeout) {
             clearTimeout(suggestionTimeout);
         }
-        
         suggestionTimeout = setTimeout(() => {
-            loadAutocompleteSuggestions(query);
+            loadUnifiedAutocomplete({ query, inputType: 'search' });
         }, 150);
     });
 
@@ -564,7 +843,7 @@ document.addEventListener("DOMContentLoaded", () => {
     searchInput.addEventListener("focus", () => {
         const query = searchInput.value.trim();
         if (query.length >= 1) {
-            loadAutocompleteSuggestions(query);
+            loadUnifiedAutocomplete({ query, inputType: 'search' });
         }
     });
 
@@ -572,12 +851,26 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!e.target.closest('.search-wrapper')) {
             hideSuggestions();
         }
+        if (!e.target.closest('.chat-input-container')) {
+            hideChatSuggestions();
+        }
+    });
+
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+            if (isAnswerLoading && currentAbortController) {
+                stopGeneration(`message-${messageCounter}`);
+            }
+            hideSuggestions();
+            hideChatSuggestions();
+        }
     });
 
     searchButton.addEventListener("click", () => {
         const question = searchInput.value.trim();
         if (question) {
-            fetchAnswer(question);
+            hideSuggestions();
+            startChatFlow(question);
         }
     });
 
@@ -585,22 +878,62 @@ document.addEventListener("DOMContentLoaded", () => {
         if (e.key === "Enter" && !suggestionsVisible) {
             const question = searchInput.value.trim();
             if (question) {
-                fetchAnswer(question);
+                hideSuggestions();
+                startChatFlow(question);
             }
         }
     });
 
-    backButton.addEventListener("click", showHeroSection);
-
-    document.getElementById("feedbackYes").addEventListener("click", function() {
-        this.classList.add("active");
-        document.getElementById("feedbackNo").classList.remove("active");
+    chatInput.addEventListener("input", (e) => {
+        if (isAnswerLoading) return;
+        const query = e.target.value.trim();
+        chatInput.dataset.originalValue = query;
+        if (suggestionTimeout) {
+            clearTimeout(suggestionTimeout);
+        }
+        suggestionTimeout = setTimeout(() => {
+            loadUnifiedAutocomplete({ query, inputType: 'chat' });
+        }, 150);
     });
 
-    document.getElementById("feedbackNo").addEventListener("click", function() {
-        this.classList.add("active");
-        document.getElementById("feedbackYes").classList.remove("active");
+    chatInput.addEventListener("keydown", (e) => {
+        if (isAnswerLoading && e.key !== 'Escape') {
+            e.preventDefault();
+            return;
+        }
+        handleChatSuggestionKeyboard(e);
     });
 
+    chatInput.addEventListener("focus", () => {
+        if (isAnswerLoading) return;
+        const query = chatInput.value.trim();
+        if (query.length >= 1) {
+            loadUnifiedAutocomplete({ query, inputType: 'chat' });
+        }
+    });
+
+    chatSendButton.addEventListener("click", () => {
+        if (isAnswerLoading) return;
+        
+        const question = chatInput.value.trim();
+        if (question) {
+            hideChatSuggestions();
+            addChatMessage(question);
+            chatInput.value = '';
+        }
+    });
+
+    chatInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter" && !chatSuggestionsVisible && !isAnswerLoading) {
+            const question = chatInput.value.trim();
+            if (question) {
+                hideChatSuggestions();
+                addChatMessage(question);
+                chatInput.value = '';
+            }
+        }
+    });
+
+    // Focus search input initially
     searchInput.focus();
 });
