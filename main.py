@@ -69,7 +69,7 @@ logger.info("LLM initialized successfully")
 # Main QA prompt template
 prompt_template = PromptTemplate(
     input_variables=["context", "question"],
-    template="""You are Arena2036's helpful virtual assistant. Provide clear, focused answers using the context provided.
+    template="""You are ARENA2036's helpful virtual assistant. Provide clear, focused answers using the context provided.
 
 RESPONSE GUIDELINES:
 1. Answer directly and specifically - focus on what the user asked
@@ -112,43 +112,43 @@ logger.info("QA chain created with optimized retrieval settings")
 
 # Enhanced suggestions database with scoring
 ENHANCED_SUGGESTIONS_DB = [
-    ("How do I connect my domain to Arena2036?", 0.9),
-    ("How do I set up Arena2036 Services?", 0.95),
-    ("How do I use Arena2036 Projects?", 0.9),
-    ("How do I reset my Arena2036 account password?", 0.8),
-    ("How do I customize my Arena2036 profile?", 0.7),
-    ("How to configure Arena2036 settings?", 0.8),
-    ("How to integrate Arena2036 with third-party tools?", 0.85),
-    ("How to manage Arena2036 notifications?", 0.7),
-    ("How to export data from Arena2036?", 0.75),
-    ("How to collaborate in Arena2036 Projects?", 0.8),
-    ("How to backup Arena2036 data?", 0.7),
-    ("How to upgrade Arena2036 subscription?", 0.6),
-    ("How to delete Arena2036 account?", 0.5),
-    ("How to contact Arena2036 support?", 0.8),
-    ("What are Arena2036 system requirements?", 0.6),
-    ("How to troubleshoot Arena2036 login issues?", 0.85),
-    ("How to share Arena2036 projects?", 0.8),
-    ("How to use Arena2036 API?", 0.7),
-    ("How to install Arena2036 desktop app?", 0.75),
-    ("How to recover deleted Arena2036 files?", 0.8),
-    ("Arena2036 pricing plans comparison", 0.6),
-    ("Arena2036 security features overview", 0.7),
-    ("How to migrate from other platforms to Arena2036?", 0.65),
-    ("Arena2036 mobile app download", 0.7),
-    ("How to create Arena2036 workspace?", 0.8),
-    ("Arena2036 keyboard shortcuts list", 0.6),
-    ("How to enable two-factor authentication Arena2036?", 0.75),
-    ("Arena2036 data synchronization issues", 0.7),
-    ("How to invite team members to Arena2036?", 0.8),
-    ("Arena2036 file sharing permissions", 0.7),
+    ("How do I connect my domain to ARENA2036?", 0.9),
+    ("How do I set up ARENA2036 Services?", 0.95),
+    ("How do I use ARENA2036 Projects?", 0.9),
+    ("How do I reset my ARENA2036 account password?", 0.8),
+    ("How do I customize my ARENA2036 profile?", 0.7),
+    ("How to configure ARENA2036 settings?", 0.8),
+    ("How to integrate ARENA2036 with third-party tools?", 0.85),
+    ("How to manage ARENA2036 notifications?", 0.7),
+    ("How to export data from ARENA2036?", 0.75),
+    ("How to collaborate in ARENA2036 Projects?", 0.8),
+    ("How to backup ARENA2036 data?", 0.7),
+    ("How to upgrade ARENA2036 subscription?", 0.6),
+    ("How to delete ARENA2036 account?", 0.5),
+    ("How to contact ARENA2036 support?", 0.8),
+    ("What are ARENA2036 system requirements?", 0.6),
+    ("How to troubleshoot ARENA2036 login issues?", 0.85),
+    ("How to share ARENA2036 projects?", 0.8),
+    ("How to use ARENA2036 API?", 0.7),
+    ("How to install ARENA2036 desktop app?", 0.75),
+    ("How to recover deleted ARENA2036 files?", 0.8),
+    ("ARENA2036 pricing plans comparison", 0.6),
+    ("ARENA2036 security features overview", 0.7),
+    ("How to migrate from other platforms to ARENA2036?", 0.65),
+    ("ARENA2036 mobile app download", 0.7),
+    ("How to create ARENA2036 workspace?", 0.8),
+    ("ARENA2036 keyboard shortcuts list", 0.6),
+    ("How to enable two-factor authentication ARENA2036?", 0.75),
+    ("ARENA2036 data synchronization issues", 0.7),
+    ("How to invite team members to ARENA2036?", 0.8),
+    ("ARENA2036 file sharing permissions", 0.7),
     # Website research topics
     ("What is Wire Harness Automation and Standardization?", 0.8),
     ("What is Industrial AI?", 0.8),
     ("What is the Asset Administration Shell (AAS)?", 0.8),
     ("What is the Industrial Metaverse?", 0.8),
     ("What are Data Spaces?", 0.8),
-    ("Where can I find Arena2036 publications?", 0.7),
+    ("Where can I find ARENA2036 publications?", 0.7),
     # Project names
     ("What is the Well-defined Research Campus Initiative?", 0.7),
     ("What is CARpulse?", 0.7),
@@ -162,8 +162,8 @@ ENHANCED_SUGGESTIONS_DB = [
     ("What is the Wire Harness standardization initiative?", 0.7),
     ("What is the Transformation hub for the Wire Harness?", 0.7),
     ("What is the Asset Administration Shell for the Wire Harness?", 0.7),
-    ("How to view all Arena2036 projects?", 0.6),
-    ("How to view completed Arena2036 projects?", 0.6)
+    ("How to view all ARENA2036 projects?", 0.6),
+    ("How to view completed ARENA2036 projects?", 0.6)
 ]
 
 # Initialize optimized trie
