@@ -3,8 +3,8 @@ from fastapi import FastAPI, HTTPException, Request
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_groq import ChatGroq
-from langchain_community.vectorstores import Chroma
+from langchain_groq import ChatGroq  # Commented out Groq import
+from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import PromptTemplate
 from langchain.chains import RetrievalQA
@@ -16,6 +16,13 @@ import time
 from collections import deque
 from typing import List
 from trie_utils import TrieNode, OptimizedTrie
+from image_gen import generate_image
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+import re
+from tiktoken import get_encoding
+# New import for OpenRouter
+from langchain_openai import ChatOpenAI
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -23,12 +30,13 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
-groq_api_key = os.getenv("GROQ_API_KEY")
-if not groq_api_key:
-    raise ValueError("GROQ_API_KEY not found in .env file")
+groq_api_key = os.getenv("GROQ_API_KEY")  # Commented out Groq API key
+# openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+# if not openrouter_api_key:
+#     raise ValueError("OPENROUTER_API_KEY not found in .env file")
 
 # Initialize FastAPI app
-app = FastAPI(title="Arena2036 Virtual Assistant")
+app = FastAPI(title="ARENA2036 Virtual Assistant")
 
 # Add CORS middleware
 app.add_middleware(
@@ -41,9 +49,9 @@ app.add_middleware(
 
 # Initialize embeddings and vector store
 try:
-    embeddings = HuggingFaceEmbeddings( model_name="sentence-transformers/all-mpnet-base-v2")
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
     vectorstore = Chroma(
-        persist_directory="vector_db",
+        persist_directory="vector_db_medium_semantic", #vector_db_arena #vector_data
         collection_name="arena2036_en",
         embedding_function=embeddings
     )
@@ -52,51 +60,86 @@ except Exception as e:
     logger.error(f"Failed to load vector store: {str(e)}")
     raise HTTPException(status_code=500, detail="Vector store initialization failed")
 
+# --- TOKEN COUNTING UTILITIES ---
+enc = get_encoding("cl100k_base")  # adjust encoding as needed
+
+def count_tokens(text: str) -> int:
+    return len(enc.encode(text))
+
+def log_request_size(contexts: List[str], question: str, template: str):
+    q_toks = count_tokens(question)
+    ctx_toks = sum(count_tokens(c) for c in contexts)
+    overhead = count_tokens(template.format(context="{context}", question="{question}"))
+    total = q_toks + ctx_toks + overhead
+    logger.info(f"Token usage → question: {q_toks}, context: {ctx_toks}, overhead: {overhead}, total: {total}")
+    return total
+
 # Initialize LLM with optimized settings
-temperature = float(os.getenv("LLM_TEMPERATURE", 0.0))  # Deterministic by default
-max_tokens = int(os.getenv("LLM_MAX_TOKENS", 500))
+# — Production LLM settings —
+temperature = float(os.getenv("LLM_TEMPERATURE", 0.0))  # low creativity
+max_tokens = int(os.getenv("LLM_MAX_TOKENS", 1024))       # cap response size
+# Commented out original Groq LLM initialization
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
     api_key=groq_api_key,
     temperature=temperature,
     max_tokens=max_tokens,
-    top_p=0.9,
+    top_p=0.95,
     timeout=60,
-    max_retries=5
+    max_retries=3
 )
+# New OpenRouter LLM initialization
+# llm = ChatOpenAI(
+#     model="mistralai/mistral-small-3.2-24b-instruct:free",
+#     api_key=openrouter_api_key,
+#     base_url="https://openrouter.ai/api/v1",
+#     temperature=temperature,
+#     max_tokens=max_tokens,
+#     top_p=0.9,
+#     timeout=60,
+#     max_retries=2
+# )
 logger.info("LLM initialized successfully")
 
 # Main QA prompt template
+from langchain.prompts import PromptTemplate
+
 prompt_template = PromptTemplate(
     input_variables=["context", "question"],
-    template="""You are Arena2036's helpful virtual assistant. Provide clear, focused answers using the context provided.
+    template="""You are ARENA2036's intelligent and helpful virtual assistant. Using only the context provided below, generate a **clear**, **well-structured**, and **accurate** answer in proper **Markdown** format.
 
-RESPONSE GUIDELINES:
-1. Answer directly and specifically - focus on what the user asked
-2. Use simple, clear language and proper Markdown formatting
-3. Structure information logically with headers (##) and bullet points when needed
-4. Provide essential information without overwhelming details
-5. Include only the most relevant steps or actions
-6. Keep responses concise but complete
-7. Use **bold** for important terms and *italics* for emphasis
+## 🧭 RESPONSE INSTRUCTIONS:
 
-Context Information:
+- Use valid **Markdown formatting**
+- Use appropriate **headings (##)** to organize sections logically
+- Use **bullet points**, **numbered lists**, or **tables** if it improves readability
+- Highlight key terms using **bold** and important concepts using *italics*
+- Do **not** include any information not grounded in the provided context
+
+---
+
+### 📚 Context:
 {context}
 
-User Question: {question}
+---
 
-Helpful Answer:"""
+### ❓ User Question:
+{question}
+
+---
+
+### ✅ Answer:
+"""
 )
 
 
-
-# Configure retriever parameters tuned to your vector DB
+# — Production retriever settings —
 retriever = vectorstore.as_retriever(
     search_type="mmr",
     search_kwargs={
-        "k": 3,         # return top 4 chunks
-        "fetch_k": 5,   # consider top 8 for MMR
-        "lambda_mult": 0.6
+        "k": 3,        
+        "fetch_k": 12,    
+        "lambda_mult": 0.7
     }
 )
 
@@ -112,43 +155,38 @@ logger.info("QA chain created with optimized retrieval settings")
 
 # Enhanced suggestions database with scoring
 ENHANCED_SUGGESTIONS_DB = [
-    ("How do I connect my domain to Arena2036?", 0.9),
-    ("How do I set up Arena2036 Services?", 0.95),
-    ("How do I use Arena2036 Projects?", 0.9),
-    ("How do I reset my Arena2036 account password?", 0.8),
-    ("How do I customize my Arena2036 profile?", 0.7),
-    ("How to configure Arena2036 settings?", 0.8),
-    ("How to integrate Arena2036 with third-party tools?", 0.85),
-    ("How to manage Arena2036 notifications?", 0.7),
-    ("How to export data from Arena2036?", 0.75),
-    ("How to collaborate in Arena2036 Projects?", 0.8),
-    ("How to backup Arena2036 data?", 0.7),
-    ("How to upgrade Arena2036 subscription?", 0.6),
-    ("How to delete Arena2036 account?", 0.5),
-    ("How to contact Arena2036 support?", 0.8),
-    ("What are Arena2036 system requirements?", 0.6),
-    ("How to troubleshoot Arena2036 login issues?", 0.85),
-    ("How to share Arena2036 projects?", 0.8),
-    ("How to use Arena2036 API?", 0.7),
-    ("How to install Arena2036 desktop app?", 0.75),
-    ("How to recover deleted Arena2036 files?", 0.8),
-    ("Arena2036 pricing plans comparison", 0.6),
-    ("Arena2036 security features overview", 0.7),
-    ("How to migrate from other platforms to Arena2036?", 0.65),
-    ("Arena2036 mobile app download", 0.7),
-    ("How to create Arena2036 workspace?", 0.8),
-    ("Arena2036 keyboard shortcuts list", 0.6),
-    ("How to enable two-factor authentication Arena2036?", 0.75),
-    ("Arena2036 data synchronization issues", 0.7),
-    ("How to invite team members to Arena2036?", 0.8),
-    ("Arena2036 file sharing permissions", 0.7),
+    
+    ("How do I set up ARENA2036 Services?", 0.95),
+    ("How do I use ARENA2036 Projects?", 0.9),
+    
+    ("How do I customize my ARENA2036 profile?", 0.7),
+    ("How to configure ARENA2036 settings?", 0.8),
+    ("How to integrate ARENA2036 with third-party tools?", 0.85),
+    
+    ("How to contact ARENA2036 support?", 0.8),
+    ("What are ARENA2036 system requirements?", 0.6),
+    ("How to troubleshoot ARENA2036 login issues?", 0.85),
+    ("How to share ARENA2036 projects?", 0.8),
+    ("How to use ARENA2036 API?", 0.7),
+    ("How to install ARENA2036 desktop app?", 0.75),
+    ("How to recover deleted ARENA2036 files?", 0.8),
+    ("ARENA2036 pricing plans comparison", 0.6),
+    ("ARENA2036 security features overview", 0.7),
+    ("How to migrate from other platforms to ARENA2036?", 0.65),
+    ("ARENA2036 mobile app download", 0.7),
+    ("How to create ARENA2036 workspace?", 0.8),
+    ("ARENA2036 keyboard shortcuts list", 0.6),
+    ("How to enable two-factor authentication ARENA2036?", 0.75),
+    ("ARENA2036 data synchronization issues", 0.7),
+    ("How to invite team members to ARENA2036?", 0.8),
+    ("ARENA2036 file sharing permissions", 0.7),
     # Website research topics
     ("What is Wire Harness Automation and Standardization?", 0.8),
     ("What is Industrial AI?", 0.8),
     ("What is the Asset Administration Shell (AAS)?", 0.8),
     ("What is the Industrial Metaverse?", 0.8),
     ("What are Data Spaces?", 0.8),
-    ("Where can I find Arena2036 publications?", 0.7),
+    ("Where can I find ARENA2036 publications?", 0.7),
     # Project names
     ("What is the Well-defined Research Campus Initiative?", 0.7),
     ("What is CARpulse?", 0.7),
@@ -162,8 +200,8 @@ ENHANCED_SUGGESTIONS_DB = [
     ("What is the Wire Harness standardization initiative?", 0.7),
     ("What is the Transformation hub for the Wire Harness?", 0.7),
     ("What is the Asset Administration Shell for the Wire Harness?", 0.7),
-    ("How to view all Arena2036 projects?", 0.6),
-    ("How to view completed Arena2036 projects?", 0.6)
+    ("How to view all ARENA2036 projects?", 0.6),
+    ("How to view completed ARENA2036 projects?", 0.6)
 ]
 
 # Initialize optimized trie
@@ -184,58 +222,112 @@ def get_autocomplete_suggestions(query: str, max_results: int = 20) -> List[str]
     
     return suggestion_trie.search_prefix(query, max_results)
 
+image_templates = [
+    "generate an image of",
+    "show me a picture of",
+    "create an illustration of",
+    "provide an image",
+    "draw me a photo of",
+    "render an image of",
+    "give me a picture of",
+    "i want an image of",
+    "make a graphic of",
+    "produce a visual of",
+    "sketch me a scene of",
+    "display a photo of"
+]
+
+image_embs = embeddings.embed_documents(image_templates)
+THRESHOLD = 0.6  # lower threshold for recall
+# simple keyword fallback
+_keyword_re = re.compile(r"\b(image|picture|photo|illustration|draw|show)\b", re.IGNORECASE)
+def is_image_intent(text: str) -> bool:
+    # quick keyword check
+    if _keyword_re.search(text):
+        logger.info("Keyword match for image intent")
+        return True
+    # embedding check
+    user_emb = embeddings.embed_query(text)
+    sims = cosine_similarity([user_emb], image_embs)[0]
+    max_sim = float(np.max(sims))
+    logger.info(f"Max image-intent similarity: {max_sim}")
+    return max_sim >= THRESHOLD
+
 # API Endpoints
 @app.get("/")
 async def health_check():
     return {"status": "healthy"}
 
+# Modify the existing /query endpoint to handle image generation
 @app.get("/query")
 async def query_assistant(request: Request, question: str):
     try:
         logger.info(f"Query: {question}")
-        
-        # Check if client disconnected
         if await request.is_disconnected():
-            logger.info("Client disconnected, aborting query")
             return {"error": "Request aborted"}
-        
-        # Create a timeout for the LLM call
+
+        # Use embedding-based intent detection
+        if is_image_intent(question):
+            # find best template match to strip prefix
+            user_emb = embeddings.embed_query(question)
+            sims = cosine_similarity([user_emb], image_embs)[0]
+            best_idx = int(np.argmax(sims))
+            image_prompt = question.lower().replace(image_templates[best_idx], "").strip()
+            if not image_prompt:
+                raise HTTPException(status_code=400, detail="Image generation prompt is empty")
+
+            result = await generate_image(image_prompt)
+            if result.get("error"):
+                raise HTTPException(status_code=500, detail=result["error"])
+
+            return {
+                "answer": f"![Generated Image]({result['image_url']})",
+                "sources": [],
+                "is_image": True
+            }
+
+        # Regular QA flow
         async def run_qa_chain():
-            return qa_chain({"query": question})
-        
-        try:
-            # Run with timeout and check for disconnection
-            res = await asyncio.wait_for(run_qa_chain(), timeout=60.0)
-            
-            # Check again if client disconnected during processing
-            if await request.is_disconnected():
-                logger.info("Client disconnected during processing")
-                return {"error": "Request aborted"}
-                
-        except asyncio.TimeoutError:
-            logger.warning(f"Query timeout for: {question}")
-            raise HTTPException(status_code=504, detail="Request timeout")
-        
+            return qa_chain.invoke({"query": question})
+
+        res = await asyncio.wait_for(run_qa_chain(), timeout=60.0)
+        # LOG token usage
+        docs = res.get("source_documents", [])[:3]
+        contexts = [doc.page_content for doc in docs]
+        log_request_size(contexts, question, prompt_template.template)
+        if await request.is_disconnected():
+            return {"error": "Request aborted"}
+
         answer = res["result"]
         docs = res.get("source_documents", [])[:3]
-
-        sources = []
-        seen_urls = set()
+        sources, seen = [], set()
         for doc in docs:
             url = doc.metadata.get("url", "")
             title = doc.metadata.get("title", "Resource")
-            if url and url not in seen_urls:
+            if url and url not in seen:
                 sources.append({"url": url, "title": title})
-                seen_urls.add(url)
+                seen.add(url)
 
-        return {"answer": answer, "sources": sources}
-        
-    except asyncio.CancelledError:
-        logger.info("Query cancelled by client")
-        return {"error": "Request cancelled"}
+        return {"answer": answer, "sources": sources, "is_image": False}
+
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Request timeout")
     except Exception as e:
         logger.error(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/serve-image")
+async def serve_image(path: str):
+    import os
+    from fastapi.responses import FileResponse
+    try:
+        file_path = os.path.abspath(path)  # Validate path
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Image not found")
+        return FileResponse(file_path, media_type="image/png")  # Adjust media type if needed
+    except Exception as e:
+        logger.error(f"Error serving image: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to serve image")
 
 @app.get("/suggestions")
 async def get_suggestions(q: str = "", limit: int = 20):
@@ -261,7 +353,6 @@ async def get_suggestions(q: str = "", limit: int = 20):
             "processing_time_ms": 0,
             "error": "Using fallback suggestions"
         }
-
 
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
@@ -289,6 +380,35 @@ def get_top_related_questions(user_question: str, limit: int = 4):
         # Fallback: return top suggestions
         return _suggestion_texts[:limit]
 
+@app.post("/generate-image")
+async def generate_image_endpoint(request: Request, prompt: str):
+    """Generate an image based on the provided prompt."""
+    try:
+        logger.info(f"Image generation request: {prompt}")
+        
+        # Check if client disconnected
+        if await request.is_disconnected():
+            logger.info("Client disconnected, aborting image generation")
+            return {"error": "Request aborted"}
+        
+        # Generate image
+        result = await generate_image(prompt)
+        
+        if result["error"]:
+            raise HTTPException(status_code=500, detail=result["error"])
+            
+        return {
+            "image_url": result["image_url"],
+            "prompt": prompt
+        }
+        
+    except asyncio.CancelledError:
+        logger.info("Image generation cancelled by client")
+        return {"error": "Request cancelled"}
+    except Exception as e:
+        logger.error(f"Image generation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.get("/related-questions")
 async def get_related_questions(question: str, limit: int = 4):
     """Return related questions most similar to the user's question using embeddings."""

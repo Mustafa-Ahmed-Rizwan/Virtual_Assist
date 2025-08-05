@@ -12,5 +12,9 @@ wheels/
 .env
 
 # Vector database
-vector_db/
+vector_db_medium_semantic/
 
+#model
+models/
+
+generated_images/

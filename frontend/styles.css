@@ -440,6 +440,14 @@ body {
     color: white;
     font-weight: 600;
 }
+/* Add to styles.css after .answer-content styles */
+.answer-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
 
 /* Sources Section */
 .sources-section {

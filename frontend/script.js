@@ -287,11 +287,11 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (error) {
             console.error("Error loading suggestions:", error);
             renderQuickHelp([
-                "How do I connect my domain to Arena2036?",
-                "How do I set up Arena2036 Services?",
-                "How do I use Arena2036 Projects?",
-                "How do I reset my Arena2036 account?",
-                "How do I customize my Arena2036 profile?"
+                "How do I connect my domain to ARENA2036?",
+                "How do I set up ARENA2036 Services?",
+                "How do I use ARENA2036 Projects?",
+                "How do I reset my ARENA2036 account?",
+                "How do I customize my ARENA2036 profile?"
             ]);
         }
     }
@@ -585,107 +585,130 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function addChatMessage(question) {
-        if (isAnswerLoading) return; // Importance: Prevent new messages during loading
-        
-        messageCounter++;
-        const messageId = `message-${messageCounter}`;
-        
-        // Importance: Set loading state
-        isAnswerLoading = true;
-        updateInputStates();
-        
-        // Create message container
-        const messageElement = document.createElement('div');
-        messageElement.className = 'chat-message';
-        messageElement.id = messageId;
-        
-        // Initial message structure with loading
-        messageElement.innerHTML = `
-            <div class="question-display">${question}</div>
-            <div class="answer-section">
-                <div class="answer-header">
-                    <span class="answer-icon">✨</span>
-                    <span class="answer-label">Answer</span>
-                    <button class="stop-generation-btn" onclick="stopGeneration('${messageId}')">
+    if (isAnswerLoading) return;
+    
+    messageCounter++;
+    const messageId = `message-${messageCounter}`;
+    
+    isAnswerLoading = true;
+    updateInputStates();
+    
+    const messageElement = document.createElement('div');
+    messageElement.className = 'chat-message';
+    messageElement.id = messageId;
+    
+    const isImageRequest = /\b(?:image|picture|photo|illustration|draw|render)\b/i.test(question);
+    const headerIcon      = isImageRequest ? '🖼️' : '✨';
+    const headerLabel     = isImageRequest ? 'Creating your image' : 'Answer';
+    const loadingMessage  = isImageRequest
+                            ? 'Hang tight, your image is being crafted…'
+                            : 'Finding the best answer for you…';
+
+    messageElement.innerHTML = `
+        <div class="question-display">${question}</div>
+        <div class="answer-section ${isImageRequest ? 'image-mode' : ''}">
+            <div class="answer-header">
+                <span class="answer-icon">${headerIcon}</span>
+                <span class="answer-label">${headerLabel}</span>
+                ${isImageRequest
+                  ? `<button class="stop-generation-btn" onclick="stopGeneration('${messageId}')">
                         <svg viewBox="0 0 24 24" width="16" height="16">
                             <rect x="8" y="8" width="8" height="8" fill="currentColor" rx="2"/>
                         </svg>
-                    </button>
-                </div>
-                <div class="loading-state">
-                    <div class="loading-spinner"></div>
-                    <p class="loading-text">Finding the best answer for you...</p>
-                </div>
+                     </button>`
+                  : ''
+                }
             </div>
-        `;
-        
-        // Add to conversation history
-        conversationHistory.appendChild(messageElement);
-        
-        // Fetch answer
-        fetchAnswerForMessage(question, messageId);
-        
-        // Scroll to new message
-        setTimeout(() => {
-            scrollToBottom();
-        }, 100);
-    }
+            <div class="loading-state">
+                <div class="loading-spinner"></div>
+                <p class="loading-text">${loadingMessage}</p>
+            </div>
+        </div>
+    `;
+    
+    conversationHistory.appendChild(messageElement);
+    
+    fetchAnswerForMessage(question, messageId);
+    
+    setTimeout(() => {
+        scrollToBottom();
+    }, 100);
+}
 
     const fetchAnswerForMessage = async (question, messageId) => {
-        const messageElement = document.getElementById(messageId);
-        const answerSection = messageElement.querySelector('.answer-section');
+    const messageElement = document.getElementById(messageId);
+    const answerSection = messageElement.querySelector('.answer-section');
+    
+    currentAbortController = new AbortController();
+    
+    try {
+        const response = await fetch(`http://localhost:8000/query?question=${encodeURIComponent(question)}`, {
+            signal: currentAbortController.signal
+        });
         
-        // Importance: Create abort controller for this request
-        currentAbortController = new AbortController();
-        
-        try {
-            const response = await fetch(`http://localhost:8000/query?question=${encodeURIComponent(question)}`, {
-                signal: currentAbortController.signal
-            });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const data = await response.json();
-            
-            // Update message with answer
-            renderAnswerInMessage(answerSection, data.answer, data.sources, question);
-            
-        } catch (error) {
-            if (error.name === 'AbortError') {
-                renderAnswerInMessage(answerSection, "## Answer Stopped\n\nGeneration was stopped by user.", [], question);
-            } else {
-                console.error("Error:", error);
-                
-                let errorMessage = "I'm having trouble connecting right now. Please try again in a moment.";
-                
-                if (error.message.includes('Failed to fetch')) {
-                    errorMessage = "Unable to connect to the server. Please check your connection and try again.";
-                } else if (error.message.includes('500')) {
-                    errorMessage = "The server is experiencing issues. Please try again later.";
-                }
-                
-                renderAnswerInMessage(answerSection, `## Error\n\n${errorMessage}`, [], question);
-            }
-        } finally {
-            // Importance: Reset loading state
-            isAnswerLoading = false;
-            currentAbortController = null;
-            updateInputStates();
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
-    };
-
-    function renderAnswerInMessage(answerSection, markdownText, sources, question) {
-        const htmlContent = marked.parse(markdownText);
         
-        // Create answer content
-        const answerContentHtml = `
+        const data = await response.json();
+        
+        // Check if response is an image
+        renderAnswerInMessage(answerSection, data.answer, data.sources, question, data.is_image);
+        
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            renderAnswerInMessage(answerSection, "## Answer Stopped\n\nGeneration was stopped by user.", [], question, false);
+        } else {
+            console.error("Error:", error);
+            let errorMessage = "I'm having trouble connecting right now. Please try again in a moment.";
+            if (error.message.includes('Failed to fetch')) {
+                errorMessage = "Unable to connect to the server. Please check your connection and try again.";
+            } else if (error.message.includes('500')) {
+                errorMessage = "The server is experiencing issues. Please try again later.";
+            }
+            renderAnswerInMessage(answerSection, `## Error\n\n${errorMessage}`, [], question, false);
+        }
+    } finally {
+        isAnswerLoading = false;
+        currentAbortController = null;
+        updateInputStates();
+    }
+};
+
+    function renderAnswerInMessage(answerSection, markdownText, sources, question, isImage = false) {
+    let htmlContent;
+    
+    if (isImage) {
+    const imgUrl = markdownText.match(/!\[.*\]\((.*?)\)/)[1];
+    // Fetch and convert to base64 (temporary workaround)
+    fetch(`http://localhost:8000/serve-image?path=${encodeURIComponent(imgUrl)}`)
+        .then(response => response.blob())
+        .then(blob => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                answerSection.innerHTML = `
+                    <div class="answer-header">
+                        <span class="answer-icon">🖼️</span>
+                        <span class="answer-label">Generated Image</span>
+                    </div>
+                    <div class="answer-content">
+                        <img src="${reader.result}" alt="Generated Image" style="max-width: 100%; border-radius: 8px; margin-bottom: 12px;">
+                        <p>${markdownText.match(/!\[(.*?)\]/)[1] || 'Generated Image'}</p>
+                    </div>
+                `;
+            };
+            reader.readAsDataURL(blob);
+        })
+        .catch(error => console.error("Image fetch error:", error));
+} else {
+        // Existing markdown rendering
+        const parsedHtml = marked.parse(markdownText);
+        htmlContent = `
             <div class="answer-header">
                 <span class="answer-icon">✨</span>
                 <span class="answer-label">Answer</span>
             </div>
-            <div class="answer-content">${htmlContent}</div>
+            <div class="answer-content">${parsedHtml}</div>
             ${sources && sources.length > 0 ? `
                 <div class="sources-section">
                     <h4 class="sources-title">Sources</h4>
@@ -707,21 +730,24 @@ document.addEventListener("DOMContentLoaded", () => {
                 </div>
             </div>
         `;
-        
-        answerSection.innerHTML = answerContentHtml;
-        
-        // Highlight code blocks
+    }
+    
+    answerSection.innerHTML = htmlContent;
+    
+    // Highlight code blocks for non-image responses
+    if (!isImage) {
         answerSection.querySelectorAll('pre code').forEach((block) => {
             hljs.highlightElement(block);
         });
-        
-        // Load related questions for the first message only
-        if (conversationHistory.children.length === 1) {
-            loadRelatedQuestions(question);
-        }
-        
-        scrollToBottom();
     }
+    
+    // Load related questions for the first message only
+    if (conversationHistory.children.length === 1) {
+        loadRelatedQuestions(question);
+    }
+    
+    scrollToBottom();
+}
 
     async function loadRelatedQuestions(currentQuestion) {
         try {
