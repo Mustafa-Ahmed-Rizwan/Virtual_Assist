@@ -12,7 +12,7 @@ wheels/
 .env
 
 # Vector database
-vector_db_medium_semantic/
+arena_vectordb/
 
 #model
 models/

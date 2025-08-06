@@ -741,10 +741,16 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
     
-    // Load related questions for the first message only
-    if (conversationHistory.children.length === 1) {
-        loadRelatedQuestions(question);
-    }
+    // Always load new related questions and show loading indicator
+    relatedQuestionsSection.style.display = "block";
+    relatedQuestionsList.innerHTML = `
+        <div class="loading-state">
+            <div class="loading-spinner"></div>
+            <p class="loading-text">Loading related questions…</p>
+        </div>
+    `;
+    loadRelatedQuestions(question);
+
     
     scrollToBottom();
 }
@@ -780,6 +786,7 @@ document.addEventListener("DOMContentLoaded", () => {
             `<button class="related-question" data-question="${question}">${question}</button>`
         ).join('');
         
+        relatedQuestionsList.innerHTML = ""; // Clear previous ones
         relatedQuestionsList.innerHTML = relatedQuestionsHTML;
         relatedQuestionsSection.style.display = "block";
         

@@ -23,6 +23,17 @@ import re
 from tiktoken import get_encoding
 # New import for OpenRouter
 from langchain_openai import ChatOpenAI
+from suggestions_db import ENHANCED_SUGGESTIONS_DB  # Import the suggestions database
+import re
+from rapidfuzz import process, fuzz
+
+# Build a set of every word in your suggestion-DB (for typo lookup)
+_valid_words = set()
+for text, _ in ENHANCED_SUGGESTIONS_DB:
+     for w in re.findall(r"\b\w+\b", text):
+         _valid_words.add(w)
+_valid_words = list(_valid_words)
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -51,7 +62,7 @@ app.add_middleware(
 try:
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
     vectorstore = Chroma(
-        persist_directory="vector_db_medium_semantic", #vector_db_arena #vector_data
+        persist_directory="arena_vectordb", #vector_db_arena #vector_data
         collection_name="arena2036_en",
         embedding_function=embeddings
     )
@@ -132,14 +143,13 @@ prompt_template = PromptTemplate(
 """
 )
 
-
 # — Production retriever settings —
 retriever = vectorstore.as_retriever(
     search_type="mmr",
     search_kwargs={
         "k": 3,        
         "fetch_k": 12,    
-        "lambda_mult": 0.7
+        "lambda_mult": 0.9
     }
 )
 
@@ -152,57 +162,6 @@ qa_chain = RetrievalQA.from_chain_type(
     chain_type_kwargs={"prompt": prompt_template}
 )
 logger.info("QA chain created with optimized retrieval settings")
-
-# Enhanced suggestions database with scoring
-ENHANCED_SUGGESTIONS_DB = [
-    
-    ("How do I set up ARENA2036 Services?", 0.95),
-    ("How do I use ARENA2036 Projects?", 0.9),
-    
-    ("How do I customize my ARENA2036 profile?", 0.7),
-    ("How to configure ARENA2036 settings?", 0.8),
-    ("How to integrate ARENA2036 with third-party tools?", 0.85),
-    
-    ("How to contact ARENA2036 support?", 0.8),
-    ("What are ARENA2036 system requirements?", 0.6),
-    ("How to troubleshoot ARENA2036 login issues?", 0.85),
-    ("How to share ARENA2036 projects?", 0.8),
-    ("How to use ARENA2036 API?", 0.7),
-    ("How to install ARENA2036 desktop app?", 0.75),
-    ("How to recover deleted ARENA2036 files?", 0.8),
-    ("ARENA2036 pricing plans comparison", 0.6),
-    ("ARENA2036 security features overview", 0.7),
-    ("How to migrate from other platforms to ARENA2036?", 0.65),
-    ("ARENA2036 mobile app download", 0.7),
-    ("How to create ARENA2036 workspace?", 0.8),
-    ("ARENA2036 keyboard shortcuts list", 0.6),
-    ("How to enable two-factor authentication ARENA2036?", 0.75),
-    ("ARENA2036 data synchronization issues", 0.7),
-    ("How to invite team members to ARENA2036?", 0.8),
-    ("ARENA2036 file sharing permissions", 0.7),
-    # Website research topics
-    ("What is Wire Harness Automation and Standardization?", 0.8),
-    ("What is Industrial AI?", 0.8),
-    ("What is the Asset Administration Shell (AAS)?", 0.8),
-    ("What is the Industrial Metaverse?", 0.8),
-    ("What are Data Spaces?", 0.8),
-    ("Where can I find ARENA2036 publications?", 0.7),
-    # Project names
-    ("What is the Well-defined Research Campus Initiative?", 0.7),
-    ("What is CARpulse?", 0.7),
-    ("What is EcoFrame?", 0.7),
-    ("What is Connect4HCA?", 0.7),
-    ("What is ARENA2036-X?", 0.7),
-    ("What is the Network infrastructure for Industry 4.0?", 0.7),
-    ("What is Catena-X?", 0.7),
-    ("What is DigiTain?", 0.7),
-    ("What is the Interactive Bosch floor?", 0.7),
-    ("What is the Wire Harness standardization initiative?", 0.7),
-    ("What is the Transformation hub for the Wire Harness?", 0.7),
-    ("What is the Asset Administration Shell for the Wire Harness?", 0.7),
-    ("How to view all ARENA2036 projects?", 0.6),
-    ("How to view completed ARENA2036 projects?", 0.6)
-]
 
 # Initialize optimized trie
 suggestion_trie = OptimizedTrie()
@@ -265,6 +224,22 @@ async def query_assistant(request: Request, question: str):
         logger.info(f"Query: {question}")
         if await request.is_disconnected():
             return {"error": "Request aborted"}
+         # —— word-level typo correction (text QA only) ——
+        def _correct_word(tok: str) -> str:
+            match = process.extractOne(tok, _valid_words, scorer=fuzz.ratio)
+            return match[0] if match and match[1] >= 80 else tok
+
+    # split into words & non-words to keep punctuation
+        tokens = re.findall(r"\b\w+\b|\W+", question)
+        corrected_tokens = [
+         _correct_word(t) if t.isalnum() else t
+         for t in tokens
+       ]
+        corrected_question = "".join(corrected_tokens)
+        if corrected_question != question:
+          logger.info(f"Typo-corrected → '{corrected_question}'")
+        else:
+          corrected_question = question
 
         # Use embedding-based intent detection
         if is_image_intent(question):
@@ -288,13 +263,13 @@ async def query_assistant(request: Request, question: str):
 
         # Regular QA flow
         async def run_qa_chain():
-            return qa_chain.invoke({"query": question})
+            return qa_chain.invoke({"query": corrected_question})
 
         res = await asyncio.wait_for(run_qa_chain(), timeout=60.0)
         # LOG token usage
         docs = res.get("source_documents", [])[:3]
         contexts = [doc.page_content for doc in docs]
-        log_request_size(contexts, question, prompt_template.template)
+        log_request_size(contexts, corrected_question, prompt_template.template)
         if await request.is_disconnected():
             return {"error": "Request aborted"}
 
@@ -410,11 +385,20 @@ async def generate_image_endpoint(request: Request, prompt: str):
         raise HTTPException(status_code=500, detail=str(e))
     
 @app.get("/related-questions")
-async def get_related_questions(question: str, limit: int = 4):
-    """Return related questions most similar to the user's question using embeddings."""
-    related = get_top_related_questions(question, limit)
-    return {"related_questions": related}
+async def get_related_questions(question: str, limit: int = 5):
+    """Return related questions most similar to the user's question using embeddings,
+       but never echo back the exact question."""
+    # get a few extra so we can filter one out
+    raw = get_top_related_questions(question, limit + 1)
+    # filter out any exact (case-insensitive) match
+    filtered = [
+        q for q in raw
+        if q.strip().lower() != question.strip().lower()
+    ]
+    # return up to `limit`
+    return {"related_questions": filtered[:limit]}
+
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000) 
