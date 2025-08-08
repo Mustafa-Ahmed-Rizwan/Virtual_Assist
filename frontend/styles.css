@@ -26,20 +26,27 @@ body {
 .header-container {
     max-width: 1200px;
     margin: 0 auto;
-    padding: 0 24px;
+    /* smaller edge gaps so items sit closer to the corners */
+    padding: 0 12px;
     height: 64px;
     display: flex;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: space-between; /* logo left, langs right */
+    gap: 12px;
+    /* ensure consistent alignment across browsers */
+    align-content: center;
 }
 
 .logo {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     font-weight: 600;
     font-size: 18px;
     color: #1a1a1a;
+    margin: 0;                  /* REMOVE margin-right:auto so it won't stretch */
+    margin-left: 6px;           /* small space from left corner */
+    white-space: nowrap;        /* keep the logo + text on one line */
 }
 
 .logo-image {
@@ -890,6 +897,56 @@ body {
     transform: none !important;
     box-shadow: none !important;
 }
+/* Language Switcher Styles - Add this to your styles.css */
+.language-switcher {
+    display: flex;
+    align-items: center;        /* vertical center with logo */
+    justify-content: flex-end;
+    gap: 8px;
+    margin: 0;                  /* avoid extra vertical spacing */
+    margin-right: 6px;          /* small space from right corner */
+}
+
+/* ensure language buttons line up with header items */
+.lang-btn {
+    padding: 8px 14px;
+    border: 2px solid #e1e3e5;
+    background: white;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    color: #4b5563;
+    transition: all 0.15s ease;
+    min-width: 44px;
+    height: 40px;               /* consistent height for alignment */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;             /* ensures centered label */
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+
+.lang-btn:hover {
+    border-color: #F28C38;
+    background-color: #fff5f0;
+    color: #F28C38;
+    transform: translateY(-1px);
+}
+
+.lang-btn.active {
+    background: linear-gradient(135deg, #F28C38 0%, #ff9f47 100%);
+    color: white;
+    border-color: #F28C38;
+    box-shadow: 0 4px 12px rgba(242, 140, 56, 0.3);
+}
+
+.lang-btn.active:hover {
+    background: linear-gradient(135deg, #e07a2b 0%, #f2913d 100%);
+    transform: translateY(-1px);
+}
 
 /* Animations */
 @keyframes slideUp {
@@ -917,16 +974,12 @@ body {
 /* Responsive Design */
 @media (max-width: 768px) {
     .header-container {
-        padding: 0 16px;
+        padding: 0 10px;      /* slightly smaller side padding */
+        height: 56px;
     }
 
-    .logo {
-        font-size: 16px;
-    }
-
-    .logo-image {
-        height: 28px;
-    }
+    .logo-image { height: 28px; }
+    .logo-text { font-size: 16px; }
 
     .hero {
         padding: 60px 16px 40px;
@@ -999,20 +1052,36 @@ body {
         width: 14px;
         height: 14px;
     }
+     .language-switcher {
+        margin-bottom: 0; /* Remove this if it exists */
+    }
+    
+    .lang-btn {
+        padding: 6px 10px;
+        font-size: 13px;
+        min-width: 40px;
+        height: 36px;
+    }
 }
 
 @media (max-width: 480px) {
+    .header-container {
+        padding: 0 8px;
+        height: 52px;
+        gap: 8px;
+    }
     .hero-title {
         font-size: 28px;
     }
 
-    .logo-image {
-        height: 24px;
-    }
-
+     /* keep the text, but reduce size to avoid wrapping */
     .logo-text {
         font-size: 14px;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
+
+    .logo-image { height: 24px; }
 
     .chat-message {
         padding: 16px;
@@ -1024,6 +1093,17 @@ body {
         padding: 10px 16px;
     }
 
+    .language-switcher {
+        gap: 6px;
+        margin-right: 6px;
+    }
+
+     .lang-btn {
+        padding: 5px 8px;
+        font-size: 12px;
+        min-width: 36px;
+        height: 32px;
+    }
     .chat-suggestions-dropdown {
         left: 6px;
         right: 6px;
@@ -1034,4 +1114,8 @@ body {
         padding: 3px 6px;
         font-size: 10px;
     }
+}
+@media (max-width: 360px) {
+    .logo-text { font-size: 13px; }
+    .logo-image { height: 22px; }
 }

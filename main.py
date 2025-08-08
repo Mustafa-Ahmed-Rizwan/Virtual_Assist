@@ -1,55 +1,54 @@
 import os
-from fastapi import FastAPI, HTTPException, Request
+import json
+import logging
+import time
+import re
 import asyncio
-from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import List, Tuple
+from concurrent.futures import ThreadPoolExecutor
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_groq import ChatGroq  # Commented out Groq import
+from fastapi.responses import FileResponse
+from contextlib import asynccontextmanager
+from tiktoken import get_encoding
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+
+from langchain_groq import ChatGroq
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import PromptTemplate
 from langchain.chains import RetrievalQA
-from dotenv import load_dotenv
-import logging
-import json
-import random
-import time
-from collections import deque
-from typing import List
-from trie_utils import TrieNode, OptimizedTrie
-from image_gen import generate_image
-from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
-import re
-from tiktoken import get_encoding
-# New import for OpenRouter
+from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
-from suggestions_db import ENHANCED_SUGGESTIONS_DB  # Import the suggestions database
-import re
+
+from dotenv import load_dotenv
 from rapidfuzz import process, fuzz
 
-# Build a set of every word in your suggestion-DB (for typo lookup)
-_valid_words = set()
-for text, _ in ENHANCED_SUGGESTIONS_DB:
-     for w in re.findall(r"\b\w+\b", text):
-         _valid_words.add(w)
-_valid_words = list(_valid_words)
+# Custom modules
+from image_gen import generate_image
+from suggestions_db import ENHANCED_SUGGESTIONS_DB_EN, ENHANCED_SUGGESTIONS_DB_DE
+from trie_utils import OptimizedTrie
 
-
-# Configure logging
+# ----------------- Configuration & Logging -----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Load environment variables
 load_dotenv()
-groq_api_key = os.getenv("GROQ_API_KEY")  # Commented out Groq API key
-# openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-# if not openrouter_api_key:
-#     raise ValueError("OPENROUTER_API_KEY not found in .env file")
+groq_api_key = os.getenv("GROQ_API_KEY")
+openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+if not groq_api_key:
+    raise ValueError("GROQ_API_KEY not found in .env")
+if not openrouter_api_key:
+    logger.warning("OPENROUTER_API_KEY not found in .env; ChatOpenAI will remain commented out")
 
-# Initialize FastAPI app
+# ----------------- Thread Pool for Blocking Operations -----------------
+thread_pool = ThreadPoolExecutor(max_workers=4)
+
+# ----------------- FastAPI Initialization -------------------
 app = FastAPI(title="ARENA2036 Virtual Assistant")
-
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:3000"],
@@ -58,21 +57,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize embeddings and vector store
-try:
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
-    vectorstore = Chroma(
-        persist_directory="arena_vectordb", #vector_db_arena #vector_data
-        collection_name="arena2036_en",
-        embedding_function=embeddings
-    )
-    logger.info("Vector store loaded successfully")
-except Exception as e:
-    logger.error(f"Failed to load vector store: {str(e)}")
-    raise HTTPException(status_code=500, detail="Vector store initialization failed")
+# ----------------- Embeddings & Vector Stores ----------------
+device = "cuda" if __import__('torch').cuda.is_available() else "cpu"
 
-# --- TOKEN COUNTING UTILITIES ---
-enc = get_encoding("cl100k_base")  # adjust encoding as needed
+embeddings_en = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-mpnet-base-v2",
+    model_kwargs={"device": device, "trust_remote_code": False}
+)
+embeddings_de = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
+    model_kwargs={"device": device, "trust_remote_code": False}
+)
+
+vectorstore_en = Chroma(
+    persist_directory="vector_db",
+    collection_name="arena2036_en",
+    embedding_function=embeddings_en
+)
+vectorstore_de = Chroma(
+    persist_directory="vector_db",
+    collection_name="arena2036_de",
+    embedding_function=embeddings_de
+)
+logger.info("Vector stores loaded successfully")
+
+def get_vectorstore_and_embeddings(language: str):
+    if language.upper() == 'DE':
+        return vectorstore_de, embeddings_de
+    return vectorstore_en, embeddings_en
+
+# ----------------- Token Counting Utilities -----------------
+enc = get_encoding("cl100k_base")
 
 def count_tokens(text: str) -> int:
     return len(enc.encode(text))
@@ -84,12 +99,11 @@ def log_request_size(contexts: List[str], question: str, template: str):
     total = q_toks + ctx_toks + overhead
     logger.info(f"Token usage → question: {q_toks}, context: {ctx_toks}, overhead: {overhead}, total: {total}")
     return total
+# ----------------- LLM Initialization -----------------------
+temperature = float(os.getenv("LLM_TEMPERATURE", 0.0))
+max_tokens = int(os.getenv("LLM_MAX_TOKENS", 1024))
 
-# Initialize LLM with optimized settings
-# — Production LLM settings —
-temperature = float(os.getenv("LLM_TEMPERATURE", 0.0))  # low creativity
-max_tokens = int(os.getenv("LLM_MAX_TOKENS", 1024))       # cap response size
-# Commented out original Groq LLM initialization
+# Groq-based LLM
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
     api_key=groq_api_key,
@@ -99,7 +113,8 @@ llm = ChatGroq(
     timeout=60,
     max_retries=3
 )
-# New OpenRouter LLM initialization
+
+# OpenRouter-based LLM (commented out)
 # llm = ChatOpenAI(
 #     model="mistralai/mistral-small-3.2-24b-instruct:free",
 #     api_key=openrouter_api_key,
@@ -110,22 +125,23 @@ llm = ChatGroq(
 #     timeout=60,
 #     max_retries=2
 # )
+
 logger.info("LLM initialized successfully")
 
-# Main QA prompt template
-from langchain.prompts import PromptTemplate
-
+# ----------------- Prompt Template --------------------------
 prompt_template = PromptTemplate(
     input_variables=["context", "question"],
-    template="""You are ARENA2036's intelligent and helpful virtual assistant. Using only the context provided below, generate a **clear**, **well-structured**, and **accurate** answer in proper **Markdown** format.
+    template="""
+You are ARENA2036's intelligent and helpful virtual assistant. Using only the context provided below, generate a **clear**, **well-structured**, and **accurate** answer in proper **Markdown** format.
 
 ## 🧭 RESPONSE INSTRUCTIONS:
-
-- Use valid **Markdown formatting**
-- Use appropriate **headings (##)** to organize sections logically
-- Use **bullet points**, **numbered lists**, or **tables** if it improves readability
-- Highlight key terms using **bold** and important concepts using *italics*
-- Do **not** include any information not grounded in the provided context
+1. Use valid **Markdown formatting**
+2. Use appropriate **headings (##)**
+3. Use **bullet points**, **numbered lists**, or **tables** if helpful
+4. Highlight **bold** and *italics*
+5. Do **not** include any information not grounded in the provided context
+6. If the question is not answerable with the given context but it is somewhat related, suggest visiting the website for more info
+7. If unrelated, politely inform you cannot answer based on current information
 
 ---
 
@@ -143,262 +159,274 @@ prompt_template = PromptTemplate(
 """
 )
 
-# — Production retriever settings —
-retriever = vectorstore.as_retriever(
-    search_type="mmr",
-    search_kwargs={
-        "k": 3,        
-        "fetch_k": 12,    
-        "lambda_mult": 0.9
-    }
-)
+# ----------------- Autocomplete Trie Setup ------------------
+suggestion_trie_en = OptimizedTrie()
+suggestion_trie_de = OptimizedTrie()
+_valid_words_en = set()
+_valid_words_de = set()
 
-# Initialize QA chain
-qa_chain = RetrievalQA.from_chain_type(
-    llm=llm,
-    chain_type="stuff",
-    retriever=retriever,
-    return_source_documents=True,
-    chain_type_kwargs={"prompt": prompt_template}
-)
-logger.info("QA chain created with optimized retrieval settings")
+# Load English suggestions
+for text, score in ENHANCED_SUGGESTIONS_DB_EN:
+    suggestion_trie_en.insert(text, score)
+    for w in re.findall(r"\b\w+\b", text):
+        _valid_words_en.add(w)
+_valid_words_en = list(_valid_words_en)
 
-# Initialize optimized trie
-suggestion_trie = OptimizedTrie()
-for suggestion, score in ENHANCED_SUGGESTIONS_DB:
-    suggestion_trie.insert(suggestion, score)
+# Load German suggestions
+for text, score in ENHANCED_SUGGESTIONS_DB_DE:
+    suggestion_trie_de.insert(text, score)
+    for w in re.findall(r"\b\w+\b", text):
+        _valid_words_de.add(w)
+_valid_words_de = list(_valid_words_de)
 
-def get_autocomplete_suggestions(query: str, max_results: int = 20) -> List[str]:
-    """Ultra-fast autocomplete using optimized Trie."""
+def get_autocomplete_suggestions(query: str, max_results: int = 20, language: str = "EN") -> List[str]:
+    # Get the correct database based on language
+    if language.upper() == "DE":
+        db = ENHANCED_SUGGESTIONS_DB_DE
+        trie = suggestion_trie_de
+        valid_words = _valid_words_de
+    else:
+        db = ENHANCED_SUGGESTIONS_DB_EN
+        trie = suggestion_trie_en
+        valid_words = _valid_words_en
+    
     if not query:
-        return [item[0] for item in ENHANCED_SUGGESTIONS_DB[:max_results]]
+        return [item[0] for item in db[:max_results]]
     
     if len(query) < 2:
-        # Return suggestions that start with the character
-        filtered = [item[0] for item in ENHANCED_SUGGESTIONS_DB 
-                   if item[0].lower().startswith(query.lower())]
-        return filtered[:max_results]
+        # Return only language-specific suggestions
+        return [item[0] for item in db if item[0].lower().startswith(query.lower())][:max_results]
     
-    return suggestion_trie.search_prefix(query, max_results)
+    # Only use words from the correct language for correction
+    tokens = re.findall(r"\b\w+\b|\W+", query)
+    corrected = []
+    for tok in tokens:
+        if tok.isalnum():
+            match = process.extractOne(tok, valid_words, scorer=fuzz.ratio)
+            corrected.append(match[0] if match and match[1] >= 80 else tok)
+        else:
+            corrected.append(tok)
+    corrected_query = "".join(corrected)
+    
+    # Search only in the language-specific trie
+    suggestions = trie.search_prefix(corrected_query, max_results)
+    
+    # Ensure we only return suggestions that exist in our language DB
+    db_texts = {item[0] for item in db}
+    return [s for s in suggestions if s in db_texts][:max_results]
 
+# ----------------- Image Intent Detection -------------------
 image_templates = [
-    "generate an image of",
-    "show me a picture of",
-    "create an illustration of",
-    "provide an image",
-    "draw me a photo of",
-    "render an image of",
-    "give me a picture of",
-    "i want an image of",
-    "make a graphic of",
-    "produce a visual of",
-    "sketch me a scene of",
-    "display a photo of"
+    # English - German
+    "generate an image of",            
+    "show me a picture of",           
+    "create an illustration of",     
+    "provide an image",               
+    "draw me a photo of",             
+    "render an image of",             
+    "give me a picture of",           
+    "i want an image of",            
+    "make a graphic of",              
+    "produce a visual of",            
+    "sketch me a scene of",           
+    "display a photo of",             
+
+    # German versions
+    "erstelle ein Bild von",
+    "zeig mir ein Bild von",
+    "erstelle eine Illustration von",
+    "stelle ein Bild bereit",
+    "zeichne mir ein Foto von",
+    "rendere ein Bild von",
+    "gib mir ein Bild von",
+    "ich möchte ein Bild von",
+    "erstelle eine Grafik von",
+    "erzeuge eine visuelle Darstellung von",
+    "skizziere mir eine Szene von",
+    "zeige ein Foto von"
 ]
 
-image_embs = embeddings.embed_documents(image_templates)
-THRESHOLD = 0.6  # lower threshold for recall
-# simple keyword fallback
+image_embs_en = embeddings_en.embed_documents(image_templates)
+image_embs_de = embeddings_de.embed_documents(image_templates)
+THRESHOLD = 0.6
 _keyword_re = re.compile(r"\b(image|picture|photo|illustration|draw|show)\b", re.IGNORECASE)
-def is_image_intent(text: str) -> bool:
-    # quick keyword check
+
+def is_image_intent(text: str, language: str = "EN") -> bool:
     if _keyword_re.search(text):
         logger.info("Keyword match for image intent")
         return True
-    # embedding check
-    user_emb = embeddings.embed_query(text)
-    sims = cosine_similarity([user_emb], image_embs)[0]
+    emb_model, template_embs = (embeddings_de, image_embs_de) if language.upper()=="DE" else (embeddings_en, image_embs_en)
+    user_emb = emb_model.embed_query(text)
+    sims = cosine_similarity([user_emb], template_embs)[0]
     max_sim = float(np.max(sims))
-    logger.info(f"Max image-intent similarity: {max_sim}")
+    logger.info(f"Max image-intent similarity ({language}): {max_sim:.3f}")
     return max_sim >= THRESHOLD
 
-# API Endpoints
+
+# ----------------- Related Questions ------------------------
+_sugg_cache = {"EN": None, "DE": None}
+
+def get_suggestion_embeddings(lang: str = "EN") -> Tuple[np.ndarray, List[str]]:
+    if lang.upper()=="DE":
+        if _sugg_cache["DE"] is None:
+            texts = [t for t,_ in ENHANCED_SUGGESTIONS_DB_DE]
+            _sugg_cache["DE"] = (embeddings_de.embed_documents(texts), texts)
+        return _sugg_cache["DE"]
+    if _sugg_cache["EN"] is None:
+        texts = [t for t,_ in ENHANCED_SUGGESTIONS_DB_EN]
+        _sugg_cache["EN"] = (embeddings_en.embed_documents(texts), texts)
+    return _sugg_cache["EN"]
+
+def get_top_related_questions(user_question: str, limit: int = 5, language: str = "EN") -> List[str]:
+    emb_model = embeddings_de if language.upper()=="DE" else embeddings_en
+    user_emb = emb_model.embed_query(user_question)
+    sugg_embs, texts = get_suggestion_embeddings(language)
+    sims = cosine_similarity([user_emb], sugg_embs)[0]
+    idxs = np.argsort(sims)[::-1][:limit]
+    return [texts[i] for i in idxs if texts[i].strip().lower()!=user_question.strip().lower()][:limit]
+
+# ----------------- Async Wrapper for Blocking Operations -----------------
+async def run_qa_chain(qa_chain, query_text: str):
+    """Run the QA chain in a thread pool to avoid blocking"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(thread_pool, qa_chain.invoke, {"query": query_text})
+
+# ----------------- FastAPI Endpoints ------------------------
 @app.get("/")
 async def health_check():
     return {"status": "healthy"}
 
-# Modify the existing /query endpoint to handle image generation
 @app.get("/query")
-async def query_assistant(request: Request, question: str):
+async def query_assistant(request: Request, question: str, lang: str = "EN"):
     try:
-        logger.info(f"Query: {question}")
-        if await request.is_disconnected():
-            return {"error": "Request aborted"}
-         # —— word-level typo correction (text QA only) ——
-        def _correct_word(tok: str) -> str:
-            match = process.extractOne(tok, _valid_words, scorer=fuzz.ratio)
-            return match[0] if match and match[1] >= 80 else tok
+        logger.info(f"Query: {question}, Language: {lang}")
+        vectorstore, emb_model = get_vectorstore_and_embeddings(lang)
 
-    # split into words & non-words to keep punctuation
-        tokens = re.findall(r"\b\w+\b|\W+", question)
-        corrected_tokens = [
-         _correct_word(t) if t.isalnum() else t
-         for t in tokens
-       ]
-        corrected_question = "".join(corrected_tokens)
-        if corrected_question != question:
-          logger.info(f"Typo-corrected → '{corrected_question}'")
-        else:
-          corrected_question = question
-
-        # Use embedding-based intent detection
-        if is_image_intent(question):
-            # find best template match to strip prefix
-            user_emb = embeddings.embed_query(question)
-            sims = cosine_similarity([user_emb], image_embs)[0]
+        if is_image_intent(question, lang):
+            templates = image_templates
+            embs = image_embs_de if lang.upper()=="DE" else image_embs_en
+            user_emb = emb_model.embed_query(question)
+            sims = cosine_similarity([user_emb], embs)[0]
             best_idx = int(np.argmax(sims))
-            image_prompt = question.lower().replace(image_templates[best_idx], "").strip()
-            if not image_prompt:
-                raise HTTPException(status_code=400, detail="Image generation prompt is empty")
-
-            result = await generate_image(image_prompt)
+            img_prompt = question.lower().replace(templates[best_idx], "").strip()
+            if not img_prompt:
+                raise HTTPException(status_code=400, detail="Image prompt empty")
+            result = await generate_image(img_prompt)
             if result.get("error"):
                 raise HTTPException(status_code=500, detail=result["error"])
+            return {"answer": f"![Generated Image]({result['image_url']})", "sources": [], "is_image": True}
 
-            return {
-                "answer": f"![Generated Image]({result['image_url']})",
-                "sources": [],
-                "is_image": True
-            }
+        retriever = vectorstore.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k":3, "fetch_k":12, "lambda_mult":0.9}
+        )
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=llm,
+            chain_type="stuff",
+            retriever=retriever,
+            return_source_documents=True,
+            chain_type_kwargs={"prompt": prompt_template}
+        )
+        
+        # typo correction
+        def _correct(tok: str) -> str:
+            # Use the appropriate word list based on language
+            valid_words = _valid_words_de if lang.upper() == "DE" else _valid_words_en
+            m = process.extractOne(tok, valid_words, scorer=fuzz.ratio)
+            return m[0] if m and m[1]>=80 else tok
+            
+        tokens = re.findall(r"\b\w+\b|\W+", question)
+        corrected = "".join([_correct(t) if t.isalnum() else t for t in tokens])
+        if corrected != question:
+            logger.info(f"Typo-corrected → '{corrected}'")
+        query_text = corrected
 
-        # Regular QA flow
-        async def run_qa_chain():
-            return qa_chain.invoke({"query": corrected_question})
-
-        res = await asyncio.wait_for(run_qa_chain(), timeout=60.0)
-        # LOG token usage
+        # FIXED: Use the async wrapper instead of awaiting the sync function
+        res = await asyncio.wait_for(run_qa_chain(qa_chain, query_text), timeout=60.0)
+        
         docs = res.get("source_documents", [])[:3]
-        contexts = [doc.page_content for doc in docs]
-        log_request_size(contexts, corrected_question, prompt_template.template)
-        if await request.is_disconnected():
-            return {"error": "Request aborted"}
+        contexts = [d.page_content for d in docs]
+        log_request_size(contexts, query_text, prompt_template.template)
 
         answer = res["result"]
-        docs = res.get("source_documents", [])[:3]
         sources, seen = [], set()
-        for doc in docs:
-            url = doc.metadata.get("url", "")
-            title = doc.metadata.get("title", "Resource")
-            if url and url not in seen:
-                sources.append({"url": url, "title": title})
-                seen.add(url)
+        for d in docs:
+            u = d.metadata.get("url", "")
+            t = d.metadata.get("title", "Resource")
+            if u and u not in seen:
+                sources.append({"url": u, "title": t})
+                seen.add(u)
 
         return {"answer": answer, "sources": sources, "is_image": False}
 
     except asyncio.TimeoutError:
+        logger.error("Request timeout in /query")
         raise HTTPException(status_code=504, detail="Request timeout")
     except Exception as e:
-        logger.error(f"Error: {str(e)}")
+        logger.error(f"Error in /query: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.get("/suggestions")
+async def get_suggestions(q: str = "", limit: int = 20, lang: str = "EN"):
+    try:
+        start = time.time()
+        sugg = get_autocomplete_suggestions(q, limit, lang)
+        return {
+            "suggestions": sugg,
+            "query": q,
+            "language": lang,
+            "count": len(sugg),
+            "processing_ms": round((time.time()-start)*1000,2)
+        }
+    except Exception as e:
+        logger.error(f"Error getting suggestions: {e}")
+        fallback = [t for t,_ in (ENHANCED_SUGGESTIONS_DB_DE if lang.upper()=="DE" else ENHANCED_SUGGESTIONS_DB_EN)][:limit]
+        return {
+            "suggestions": fallback,
+            "query": q,
+            "language": lang,
+            "count": len(fallback),
+            "error": "fallback"
+        }
+
+@app.get("/related-questions")
+async def related_questions(question: str, limit: int = 5, lang: str = "EN"):
+    try:
+        related = get_top_related_questions(question, limit, lang)
+        return {"related_questions": related}
+    except Exception as e:
+        logger.error(f"Error related-questions: {e}")
+        return {"related_questions": []}
+
+@app.post("/generate-image")
+async def generate_image_endpoint(request: Request, prompt: str):
+    try:
+        if await request.is_disconnected():
+            raise HTTPException(status_code=499, detail="Client disconnected")
+        result = await generate_image(prompt)
+        if result.get("error"):
+            raise HTTPException(status_code=500, detail=result["error"])
+        return {"image_url": result["image_url"], "prompt": prompt}
+    except Exception as e:
+        logger.error(f"Error in generate-image: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/serve-image")
 async def serve_image(path: str):
-    import os
-    from fastapi.responses import FileResponse
     try:
-        file_path = os.path.abspath(path)  # Validate path
-        if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="Image not found")
-        return FileResponse(file_path, media_type="image/png")  # Adjust media type if needed
+        fp = Path(path).resolve()
+        if not fp.exists():
+            raise HTTPException(status_code=404, detail="Image file not found")
+        return FileResponse(str(fp), media_type="image/png")
     except Exception as e:
-        logger.error(f"Error serving image: {str(e)}")
+        logger.error(f"Error serving image: {e}")
         raise HTTPException(status_code=500, detail="Failed to serve image")
 
-@app.get("/suggestions")
-async def get_suggestions(q: str = "", limit: int = 20):
-    """Get autocomplete suggestions with optional query and limit."""
-    try:
-        start_time = time.time()
-        suggestions = get_autocomplete_suggestions(q, limit)
-        processing_time = (time.time() - start_time) * 1000  # Convert to ms
-        
-        return {
-            "suggestions": suggestions,
-            "query": q,
-            "count": len(suggestions),
-            "processing_time_ms": round(processing_time, 2)
-        }
-    except Exception as e:
-        logger.error(f"Error getting suggestions: {str(e)}")
-        fallback_suggestions = [item[0] for item in ENHANCED_SUGGESTIONS_DB[:limit]]
-        return {
-            "suggestions": fallback_suggestions,
-            "query": q,
-            "count": len(fallback_suggestions),
-            "processing_time_ms": 0,
-            "error": "Using fallback suggestions"
-        }
-
-from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
-
-# Precompute embeddings for suggestions (cache at startup)
-_suggestion_texts = [item[0] for item in ENHANCED_SUGGESTIONS_DB]
-_suggestion_embeddings = None
-def get_suggestion_embeddings():
-    global _suggestion_embeddings
-    if _suggestion_embeddings is None:
-        _suggestion_embeddings = embeddings.embed_documents(_suggestion_texts)
-    return _suggestion_embeddings
-
-def get_top_related_questions(user_question: str, limit: int = 4):
-    try:
-        user_emb = embeddings.embed_query(user_question)
-        sugg_embs = get_suggestion_embeddings()
-        # Compute cosine similarity
-        sims = cosine_similarity([user_emb], sugg_embs)[0]
-        # Get indices of top N
-        top_idx = np.argsort(sims)[::-1][:limit]
-        return [_suggestion_texts[i] for i in top_idx]
-    except Exception as e:
-        logger.error(f"Related question similarity error: {str(e)}")
-        # Fallback: return top suggestions
-        return _suggestion_texts[:limit]
-
-@app.post("/generate-image")
-async def generate_image_endpoint(request: Request, prompt: str):
-    """Generate an image based on the provided prompt."""
-    try:
-        logger.info(f"Image generation request: {prompt}")
-        
-        # Check if client disconnected
-        if await request.is_disconnected():
-            logger.info("Client disconnected, aborting image generation")
-            return {"error": "Request aborted"}
-        
-        # Generate image
-        result = await generate_image(prompt)
-        
-        if result["error"]:
-            raise HTTPException(status_code=500, detail=result["error"])
-            
-        return {
-            "image_url": result["image_url"],
-            "prompt": prompt
-        }
-        
-    except asyncio.CancelledError:
-        logger.info("Image generation cancelled by client")
-        return {"error": "Request cancelled"}
-    except Exception as e:
-        logger.error(f"Image generation error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-    
-@app.get("/related-questions")
-async def get_related_questions(question: str, limit: int = 5):
-    """Return related questions most similar to the user's question using embeddings,
-       but never echo back the exact question."""
-    # get a few extra so we can filter one out
-    raw = get_top_related_questions(question, limit + 1)
-    # filter out any exact (case-insensitive) match
-    filtered = [
-        q for q in raw
-        if q.strip().lower() != question.strip().lower()
-    ]
-    # return up to `limit`
-    return {"related_questions": filtered[:limit]}
-
+# ----------------- Cleanup on shutdown -----------------
+@app.on_event("shutdown")
+async def shutdown_event():
+    thread_pool.shutdown(wait=True)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+    uvicorn.run(app, host="0.0.0.0", port=8000)

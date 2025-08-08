@@ -13,6 +13,7 @@ wheels/
 
 # Vector database
 arena_vectordb/
+vector_db/
 
 #model
 models/

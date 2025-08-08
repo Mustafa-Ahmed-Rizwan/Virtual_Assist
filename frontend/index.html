@@ -11,23 +11,27 @@
     <script src="script.js"></script>
 </head>
 <body>
-    <header class="header">
-        <div class="header-container">
-            <div class="logo">
-                <img src="Arena_logo.png" alt="Arena2036 Logo" class="logo-image">
-                <span class="logo-text">Help Center</span>
-            </div>
+   <header class="header">
+    <div class="header-container">
+        <div class="logo">
+            <img src="Arena_logo.png" alt="Arena2036 Logo" class="logo-image">
+            <span class="logo-text" data-en="Help Center" data-de="Hilfezentrum">Help Center</span>
         </div>
-    </header>
+        <div class="language-switcher">
+            <button id="lang-en" class="lang-btn active">EN</button>
+            <button id="lang-de" class="lang-btn">DE</button>
+        </div>
+    </div>
+</header>
 
     <main class="main">
         <section class="hero" id="heroSection">
             <div class="hero-container">
-                <h1 class="hero-title">How can we help?</h1>
+                <h1 class="hero-title" data-en="How can we help?" data-de="Wie können wir helfen?">How can we help?</h1>
                 <div class="search-container">
                     <div class="search-wrapper">
                         <span class="search-icon">🔍</span>
-                        <input type="text" id="searchInput" placeholder="Search for answers..." class="search-input" autocomplete="off" autocapitalize="on" autocorrect="on" spellcheck="true">
+                        <input type="text" id="searchInput" placeholder="Search for answers..." data-placeholder-en="Search for answers..." data-placeholder-de="Nach Antworten suchen..." class="search-input" autocomplete="off" autocapitalize="on" autocorrect="on" spellcheck="true">
                         <button id="searchButton" class="search-button">↵</button>
                     </div>
                 </div>
@@ -49,7 +53,7 @@
                 <!-- Fixed Chat Input at Bottom -->
                 <div class="fixed-chat-input">
                     <div class="chat-input-container">
-                        <input type="text" id="chatInput" placeholder="Ask a follow-up question..." class="chat-input">
+                        <input type="text" id="chatInput" placeholder="Ask a follow-up question..." data-placeholder-en="Ask a follow-up question..." data-placeholder-de="Stelle eine Nachfrage..." class="chat-input">
                         <button id="chatSendButton" class="chat-send-button">
                             <svg viewBox="0 0 24 24" width="20" height="20">
                                 <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
