@@ -160,6 +160,37 @@ You are ARENA2036's intelligent and helpful virtual assistant. Using only the co
 """
 )
 
+prompt_template_de = PromptTemplate(
+    input_variables=["context", "question"],
+    template="""
+Du bist der intelligente und hilfsbereite virtuelle Assistent von ARENA2036. Verwende ausschließlich den unten bereitgestellten Kontext, um eine **klare**, **gut strukturierte** und **präzise** Antwort im **Markdown**-Format zu erstellen.
+
+## 🧭 ANTWORTANWEISUNGEN:
+1. Verwende gültiges **Markdown-Format**
+2. Nutze passende **Überschriften (##)**
+3. Verwende **Aufzählungszeichen**, **nummerierte Listen** oder **Tabellen**, wenn hilfreich
+4. Hebe **fett** und *kursiv* hervor
+5. Füge **keine** Informationen hinzu, die nicht aus dem gegebenen Kontext stammen
+6. Falls die Frage nicht vollständig beantwortbar ist, aber teilweise relevant erscheint, schlage vor, die Website für weitere Informationen zu besuchen
+7. Falls nicht relevant, weise höflich darauf hin, dass du basierend auf den aktuellen Informationen keine Antwort geben kannst
+
+---
+
+### 📚 Kontext:
+{context}
+
+---
+
+### ❓ Nutzerfrage:
+{question}
+
+---
+
+### ✅ Antwort:
+"""
+)
+
+
 # ----------------- Autocomplete Trie Setup ------------------
 suggestion_trie_en = OptimizedTrie()
 suggestion_trie_de = OptimizedTrie()
@@ -694,8 +725,13 @@ async def query_assistant(request: Request, question: str, lang: str = "EN"):
                 docs[i].page_content = ctx
 
         # Create QA chain with truncated contexts
-        from langchain.chains.question_answering import load_qa_chain
-        qa_chain = load_qa_chain(llm=llm, chain_type="stuff", prompt=prompt_template)
+       
+        qa_chain = load_qa_chain(
+        llm=llm,
+        chain_type="stuff",
+        prompt=prompt_template_de if lang.upper() == "DE" else prompt_template)
+    
+
 
         # Execute QA chain
         start_time = time.time()
