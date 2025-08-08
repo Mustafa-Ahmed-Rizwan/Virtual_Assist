@@ -292,165 +292,7 @@ async def run_qa_chain(qa_chain, query_text: str):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(thread_pool, qa_chain.invoke, {"query": query_text})
 
-
-
-# ----------------- FastAPI Endpoints ------------------------
-@app.get("/")
-async def health_check():
-    return {"status": "healthy"}
-
-@app.get("/query")
-async def query_assistant(request: Request, question: str, lang: str = "EN"):
-    try:
-        logger.info(f"Query: {question}, Language: {lang}")
-        vectorstore, emb_model = get_vectorstore_and_embeddings(lang)
-
-        # Initialize token counters
-        token_usage = {
-            "input": {
-                "prompt_template": 0,
-                "question": 0,
-                "contexts": 0,
-                "total": 0
-            },
-            "output": 0,
-            "total": 0
-        }
-
-        # Image generation path
-        if is_image_intent(question, lang):
-            templates = image_templates
-            embs = image_embs_de if lang.upper()=="DE" else image_embs_en
-            user_emb = emb_model.embed_query(question)
-            sims = cosine_similarity([user_emb], embs)[0]
-            best_idx = int(np.argmax(sims))
-            img_prompt = question.lower().replace(templates[best_idx], "").strip()
-            
-            if not img_prompt:
-                raise HTTPException(status_code=400, detail="Image prompt empty")
-            
-            result = await generate_image(img_prompt)
-            if result.get("error"):
-                raise HTTPException(status_code=500, detail=result["error"])
-            
-            # Count tokens for image path (minimal)
-            token_usage["input"]["question"] = count_tokens(question)
-            token_usage["input"]["total"] = token_usage["input"]["question"]
-            token_usage["total"] = token_usage["input"]["total"]
-            
-            logger.info(
-                f"Token Usage (Image Request):\n"
-                f"  INPUT: {token_usage['input']['total']} tokens\n"
-                f"    - Question: {token_usage['input']['question']}\n"
-                f"  OUTPUT: Image generated (token count not applicable)"
-            )
-            
-            return {
-                "answer": f"![Generated Image]({result['image_url']})", 
-                "sources": [], 
-                "is_image": True,
-                "token_usage": token_usage
-            }
-
-        # Setup retriever
-        retriever = vectorstore.as_retriever(
-            search_type="mmr",
-            search_kwargs={"k":3, "fetch_k":12, "lambda_mult":0.9}
-        )
-        
-        # Typo correction
-        def _correct(tok: str) -> str:
-            valid_words = _valid_words_de if lang.upper() == "DE" else _valid_words_en
-            m = process.extractOne(tok, valid_words, scorer=fuzz.ratio)
-            return m[0] if m and m[1]>=80 else tok
-            
-        tokens = re.findall(r"\b\w+\b|\W+", question)
-        corrected = "".join([_correct(t) if t.isalnum() else t for t in tokens])
-        if corrected != question:
-            logger.info(f"Typo-corrected → '{corrected}'")
-        query_text = corrected
-
-        # Get documents and apply smart context truncation
-        docs = retriever.get_relevant_documents(query_text)
-        contexts = [d.page_content for d in docs]
-        
-        # Apply smart context truncation
-        contexts = smart_context_truncation(contexts, query_text, emb_model, max_context_tokens=4000)
-        
-        # Update documents with truncated contexts
-        docs = docs[:len(contexts)]  # Ensure doc count matches context count
-        for i, ctx in enumerate(contexts):
-            if i < len(docs):
-                docs[i].page_content = ctx
-
-        # Create QA chain with truncated contexts
-        from langchain.chains.question_answering import load_qa_chain
-        qa_chain = load_qa_chain(llm=llm, chain_type="stuff", prompt=prompt_template)
-
-        # Execute QA chain
-        start_time = time.time()
-        res = await asyncio.wait_for(
-            asyncio.get_event_loop().run_in_executor(
-                thread_pool, 
-                lambda: qa_chain({"input_documents": docs, "question": query_text})
-            ), 
-            timeout=60.0
-        )
-        processing_time = time.time() - start_time
-        
-        # Process results
-        answer = res["output_text"]
-        
-        # Calculate token usage
-        token_usage["input"]["prompt_template"] = count_tokens(prompt_template.template)
-        token_usage["input"]["question"] = count_tokens(query_text)
-        token_usage["input"]["contexts"] = sum(count_tokens(c) for c in contexts)
-        token_usage["input"]["total"] = (
-            token_usage["input"]["prompt_template"] +
-            token_usage["input"]["question"] +
-            token_usage["input"]["contexts"]
-        )
-        
-        token_usage["output"] = count_tokens(answer)
-        token_usage["total"] = token_usage["input"]["total"] + token_usage["output"]
-        
-        # Detailed logging
-        logger.info(
-            f"Token Usage (LLM Request):\n"
-            f"  INPUT: {token_usage['input']['total']} tokens\n"
-            f"    - Template: {token_usage['input']['prompt_template']}\n"
-            f"    - Question: {token_usage['input']['question']}\n"
-            f"    - Contexts: {token_usage['input']['contexts']}\n"
-            f"  OUTPUT: {token_usage['output']} tokens\n"
-            f"  TOTAL: {token_usage['total']} tokens\n"
-            f"Processing time: {processing_time:.2f}s"
-        )
-
-        # Prepare sources
-        sources, seen = [], set()
-        for d in docs:
-            u = d.metadata.get("url", "")
-            t = d.metadata.get("title", "Resource")
-            if u and u not in seen:
-                sources.append({"url": u, "title": t})
-                seen.add(u)
-
-        return {
-            "answer": answer,
-            "sources": sources,
-            "is_image": False,
-            "processing_time": processing_time,
-            "token_usage": token_usage
-        }
-
-    except asyncio.TimeoutError:
-        logger.error("Request timeout in /query")
-        raise HTTPException(status_code=504, detail="Request timeout")
-    except Exception as e:
-        logger.error(f"Error in /query: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
-
+# ----------------- Context Truncation Utilities -----------------
 def smart_context_truncation(contexts: List[str], question: str, embeddings_model, max_context_tokens: int = 4000) -> List[str]:
     """
     Intelligently truncate context based on relevance to the question.
@@ -761,6 +603,162 @@ def truncate_context_smartly(context: str, max_tokens: int, question: str, embed
             truncated += "..."
             
         return truncated
+
+# ----------------- FastAPI Endpoints ------------------------
+@app.get("/")
+async def health_check():
+    return {"status": "healthy"}
+
+@app.get("/query")
+async def query_assistant(request: Request, question: str, lang: str = "EN"):
+    try:
+        logger.info(f"Query: {question}, Language: {lang}")
+        vectorstore, emb_model = get_vectorstore_and_embeddings(lang)
+
+        # Initialize token counters
+        token_usage = {
+            "input": {
+                "prompt_template": 0,
+                "question": 0,
+                "contexts": 0,
+                "total": 0
+            },
+            "output": 0,
+            "total": 0
+        }
+
+        # Image generation path
+        if is_image_intent(question, lang):
+            templates = image_templates
+            embs = image_embs_de if lang.upper()=="DE" else image_embs_en
+            user_emb = emb_model.embed_query(question)
+            sims = cosine_similarity([user_emb], embs)[0]
+            best_idx = int(np.argmax(sims))
+            img_prompt = question.lower().replace(templates[best_idx], "").strip()
+            
+            if not img_prompt:
+                raise HTTPException(status_code=400, detail="Image prompt empty")
+            
+            result = await generate_image(img_prompt)
+            if result.get("error"):
+                raise HTTPException(status_code=500, detail=result["error"])
+            
+            # Count tokens for image path (minimal)
+            token_usage["input"]["question"] = count_tokens(question)
+            token_usage["input"]["total"] = token_usage["input"]["question"]
+            token_usage["total"] = token_usage["input"]["total"]
+            
+            logger.info(
+                f"Token Usage (Image Request):\n"
+                f"  INPUT: {token_usage['input']['total']} tokens\n"
+                f"    - Question: {token_usage['input']['question']}\n"
+                f"  OUTPUT: Image generated (token count not applicable)"
+            )
+            
+            return {
+                "answer": f"![Generated Image]({result['image_url']})", 
+                "sources": [], 
+                "is_image": True,
+                "token_usage": token_usage
+            }
+
+        # Setup retriever
+        retriever = vectorstore.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k":3, "fetch_k":12, "lambda_mult":0.9}
+        )
+        
+        # Typo correction
+        def _correct(tok: str) -> str:
+            valid_words = _valid_words_de if lang.upper() == "DE" else _valid_words_en
+            m = process.extractOne(tok, valid_words, scorer=fuzz.ratio)
+            return m[0] if m and m[1]>=80 else tok
+            
+        tokens = re.findall(r"\b\w+\b|\W+", question)
+        corrected = "".join([_correct(t) if t.isalnum() else t for t in tokens])
+        if corrected != question:
+            logger.info(f"Typo-corrected → '{corrected}'")
+        query_text = corrected
+
+        # Get documents and apply smart context truncation
+        docs = retriever.get_relevant_documents(query_text)
+        contexts = [d.page_content for d in docs]
+        
+        # Apply smart context truncation
+        contexts = smart_context_truncation(contexts, query_text, emb_model, max_context_tokens=4000)
+        
+        # Update documents with truncated contexts
+        docs = docs[:len(contexts)]  # Ensure doc count matches context count
+        for i, ctx in enumerate(contexts):
+            if i < len(docs):
+                docs[i].page_content = ctx
+
+        # Create QA chain with truncated contexts
+        from langchain.chains.question_answering import load_qa_chain
+        qa_chain = load_qa_chain(llm=llm, chain_type="stuff", prompt=prompt_template)
+
+        # Execute QA chain
+        start_time = time.time()
+        res = await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(
+                thread_pool, 
+                lambda: qa_chain({"input_documents": docs, "question": query_text})
+            ), 
+            timeout=60.0
+        )
+        processing_time = time.time() - start_time
+        
+        # Process results
+        answer = res["output_text"]
+        
+        # Calculate token usage
+        token_usage["input"]["prompt_template"] = count_tokens(prompt_template.template)
+        token_usage["input"]["question"] = count_tokens(query_text)
+        token_usage["input"]["contexts"] = sum(count_tokens(c) for c in contexts)
+        token_usage["input"]["total"] = (
+            token_usage["input"]["prompt_template"] +
+            token_usage["input"]["question"] +
+            token_usage["input"]["contexts"]
+        )
+        
+        token_usage["output"] = count_tokens(answer)
+        token_usage["total"] = token_usage["input"]["total"] + token_usage["output"]
+        
+        # Detailed logging
+        logger.info(
+            f"Token Usage (LLM Request):\n"
+            f"  INPUT: {token_usage['input']['total']} tokens\n"
+            f"    - Template: {token_usage['input']['prompt_template']}\n"
+            f"    - Question: {token_usage['input']['question']}\n"
+            f"    - Contexts: {token_usage['input']['contexts']}\n"
+            f"  OUTPUT: {token_usage['output']} tokens\n"
+            f"  TOTAL: {token_usage['total']} tokens\n"
+            f"Processing time: {processing_time:.2f}s"
+        )
+
+        # Prepare sources
+        sources, seen = [], set()
+        for d in docs:
+            u = d.metadata.get("url", "")
+            t = d.metadata.get("title", "Resource")
+            if u and u not in seen:
+                sources.append({"url": u, "title": t})
+                seen.add(u)
+
+        return {
+            "answer": answer,
+            "sources": sources,
+            "is_image": False,
+            "processing_time": processing_time,
+            "token_usage": token_usage
+        }
+
+    except asyncio.TimeoutError:
+        logger.error("Request timeout in /query")
+        raise HTTPException(status_code=504, detail="Request timeout")
+    except Exception as e:
+        logger.error(f"Error in /query: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.get("/suggestions")
 async def get_suggestions(q: str = "", limit: int = 20, lang: str = "EN"):
