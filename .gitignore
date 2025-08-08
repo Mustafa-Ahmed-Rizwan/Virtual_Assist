@@ -12,8 +12,7 @@ wheels/
 .env
 
 # Vector database
-arena_vectordb/
-vector_db/
+arena_vector_database/
 
 #model
 models/
