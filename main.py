@@ -700,6 +700,9 @@ async def health_check():
 @app.get("/query")
 async def query_assistant(request: Request, question: str, lang: str = "EN"):
     try:
+        # Check for disconnection early
+        if await request.is_disconnected():
+             raise HTTPException(status_code=499, detail="Client disconnected")
         logger.info(f"Query: {question}, Language: {lang}")
         vectorstore, emb_model = get_vectorstore_and_embeddings(lang)
 
@@ -789,13 +792,22 @@ async def query_assistant(request: Request, question: str, lang: str = "EN"):
 
         # Execute QA chain
         start_time = time.time()
-        res = await asyncio.wait_for(
-            asyncio.get_event_loop().run_in_executor(
+        try:
+            res = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(
                 thread_pool, 
                 lambda: qa_chain.invoke({"context": docs, "question": query_text})
             ), 
             timeout=60.0
         )
+        except asyncio.CancelledError:
+            logger.info("Request was cancelled by client")
+            raise HTTPException(status_code=499, detail="Request cancelled")
+
+        except Exception as e:
+            logger.error(f"Error occurred while processing request: {e}")
+            raise HTTPException(status_code=500, detail="Internal server error")
+
         processing_time = time.time() - start_time
         
         # Process results

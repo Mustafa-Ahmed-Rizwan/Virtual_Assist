@@ -681,33 +681,24 @@ function renderQuickHelp(suggestions) {
     messageElement.className = "chat-message";
     messageElement.id = messageId;
 
-    const isImageRequest = 
-      /\b(?:image|picture|photo|illustration|draw|render|bild|foto|zeichnung|abbildung)\b/i.test(question);
-    
-    // Language-specific messages
-    const headerIcon = isImageRequest ? "🖼️" : "✨";
-    const headerLabel = isImageRequest
-        ? (currentLanguage === 'DE' ? 'Bildgenerierung' : 'Creating your image')
-        : (currentLanguage === 'DE' ? 'Antwort' : 'Answer');
-    const loadingMessage = isImageRequest
-        ? (currentLanguage === 'DE' ? 'Einen Moment bitte, Ihr Bild wird erstellt...' : 'Hang tight, your image is being crafted...')
-        : (currentLanguage === 'DE' ? 'Ich suche die beste Antwort für Sie...' : 'Finding the best answer for you...');
+    // Remove the isImageRequest check - show stop button for all responses
+    const headerIcon = "✨";
+    const headerLabel = currentLanguage === 'DE' ? 'Antwort' : 'Answer';
+    const loadingMessage = currentLanguage === 'DE' 
+        ? 'Ich suche die beste Antwort für Sie...' 
+        : 'Finding the best answer for you...';
 
     messageElement.innerHTML = `
         <div class="question-display">${question}</div>
-        <div class="answer-section ${isImageRequest ? "image-mode" : ""}">
+        <div class="answer-section">
             <div class="answer-header">
                 <span class="answer-icon">${headerIcon}</span>
                 <span class="answer-label">${headerLabel}</span>
-                ${
-                  isImageRequest
-                    ? `<button aria-label="${currentLanguage === 'DE' ? 'Generierung stoppen' : 'Stop generation'}" class="stop-generation-btn" onclick="stopGeneration('${messageId}')">
-                        <svg viewBox="0 0 24 24" width="16" height="16">
-                            <rect x="8" y="8" width="8" height="8" fill="currentColor" rx="2"/>
-                        </svg>
-                     </button>`
-                    : ""
-                }
+                <button aria-label="${currentLanguage === 'DE' ? 'Generierung stoppen' : 'Stop generation'}" class="stop-generation-btn" onclick="stopGeneration('${messageId}')">
+                    <svg viewBox="0 0 24 24" width="16" height="16">
+                        <rect x="8" y="8" width="8" height="8" fill="currentColor" rx="2"/>
+                    </svg>
+                </button>
             </div>
             <div class="loading-state">
                 <div class="loading-spinner"></div>
@@ -717,11 +708,9 @@ function renderQuickHelp(suggestions) {
     `;
 
     conversationHistory.appendChild(messageElement);
-
     fetchAnswerForMessage(question, messageId);
-
     setTimeout(() => {
-      scrollToBottom();
+        scrollToBottom();
     }, 100);
 }
 
