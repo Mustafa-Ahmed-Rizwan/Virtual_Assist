@@ -20,8 +20,7 @@ from langchain_groq import ChatGroq
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import PromptTemplate
-from langchain.chains import RetrievalQA
-from langchain.chains.question_answering import load_qa_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 
@@ -32,6 +31,27 @@ from rapidfuzz import process, fuzz
 from image_gen import generate_image
 from suggestions_db import ENHANCED_SUGGESTIONS_DB_EN, ENHANCED_SUGGESTIONS_DB_DE
 from trie_utils import OptimizedTrie
+from fastapi.responses import StreamingResponse
+import json
+
+# ----------------- Cleanup on shutdown -----------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup code - preload embeddings
+    logger.info("Starting up...")
+    logger.info("Preloading suggestion embeddings...")
+    start_time = time.time()
+    
+    # Preload both English and German embeddings
+    get_suggestion_embeddings("EN")
+    get_suggestion_embeddings("DE")
+    
+    logger.info(f"Suggestion embeddings preloaded in {time.time() - start_time:.2f} seconds")
+    
+    yield
+    # Shutdown code
+    logger.info("Shutting down...")
+    thread_pool.shutdown(wait=True)
 
 # ----------------- Configuration & Logging -----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -49,7 +69,7 @@ if not openrouter_api_key:
 thread_pool = ThreadPoolExecutor(max_workers=4)
 
 # ----------------- FastAPI Initialization -------------------
-app = FastAPI(title="ARENA2036 Virtual Assistant")
+app = FastAPI(title="ARENA2036 Virtual Assistant", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:3000"],
@@ -110,7 +130,7 @@ llm = ChatGroq(
     api_key=groq_api_key,
     temperature=temperature,
     max_tokens=max_tokens,
-    top_p=0.95,
+    model_kwargs={"top_p": 0.95},
     timeout=60,
     max_retries=3
 )
@@ -122,7 +142,7 @@ llm = ChatGroq(
 #     base_url="https://openrouter.ai/api/v1",
 #     temperature=temperature,
 #     max_tokens=max_tokens,
-#     top_p=0.9,
+#    model_kwargs={"top_p": 0.95},
 #     timeout=60,
 #     max_retries=2
 # )
@@ -299,23 +319,60 @@ def is_image_intent(text: str, language: str = "EN") -> bool:
 _sugg_cache = {"EN": None, "DE": None}
 
 def get_suggestion_embeddings(lang: str = "EN") -> Tuple[np.ndarray, List[str]]:
-    if lang.upper()=="DE":
-        if _sugg_cache["DE"] is None:
-            texts = [t for t,_ in ENHANCED_SUGGESTIONS_DB_DE]
-            _sugg_cache["DE"] = (embeddings_de.embed_documents(texts), texts)
-        return _sugg_cache["DE"]
-    if _sugg_cache["EN"] is None:
-        texts = [t for t,_ in ENHANCED_SUGGESTIONS_DB_EN]
-        _sugg_cache["EN"] = (embeddings_en.embed_documents(texts), texts)
-    return _sugg_cache["EN"]
+    lang = lang.upper()
+    if lang not in ["EN", "DE"]:
+        lang = "EN"
+        
+    if _sugg_cache[lang] is None:
+        logger.info(f"Loading embeddings for {lang}...")
+        start_time = time.time()
+        
+        # Get the correct database
+        db = ENHANCED_SUGGESTIONS_DB_DE if lang == "DE" else ENHANCED_SUGGESTIONS_DB_EN
+        texts = [t for t,_ in db]
+        
+        # Use the correct embedding model
+        emb_model = embeddings_de if lang == "DE" else embeddings_en
+        
+        # Process in batches for large datasets
+        batch_size = 100
+        embeddings = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i+batch_size]
+            embeddings.extend(emb_model.embed_documents(batch))
+            logger.debug(f"Processed batch {i//batch_size + 1}/{(len(texts)-1)//batch_size + 1}")
+        
+        _sugg_cache[lang] = (np.array(embeddings), texts)
+        logger.info(f"Loaded {len(texts)} {lang} suggestions in {time.time() - start_time:.2f} seconds")
+    
+    return _sugg_cache[lang]
 
 def get_top_related_questions(user_question: str, limit: int = 5, language: str = "EN") -> List[str]:
-    emb_model = embeddings_de if language.upper()=="DE" else embeddings_en
-    user_emb = emb_model.embed_query(user_question)
-    sugg_embs, texts = get_suggestion_embeddings(language)
-    sims = cosine_similarity([user_emb], sugg_embs)[0]
-    idxs = np.argsort(sims)[::-1][:limit]
-    return [texts[i] for i in idxs if texts[i].strip().lower()!=user_question.strip().lower()][:limit]
+    try:
+        # Get pre-loaded embeddings
+        emb_model = embeddings_de if language.upper() == "DE" else embeddings_en
+        user_emb = emb_model.embed_query(user_question)
+        sugg_embs, texts = get_suggestion_embeddings(language)
+        
+        # Calculate similarities
+        sims = cosine_similarity([user_emb], sugg_embs)[0]
+        
+        # Get top matches excluding the question itself
+        idxs = np.argsort(sims)[::-1]
+        results = []
+        for i in idxs:
+            if len(results) >= limit:
+                break
+            if texts[i].strip().lower() != user_question.strip().lower():
+                results.append(texts[i])
+        
+        return results[:limit]
+        
+    except Exception as e:
+        logger.error(f"Error in get_top_related_questions: {e}")
+        # Fallback to simple text matching if embeddings fail
+        user_q_lower = user_question.lower()
+        return [t for t in texts if t.lower() != user_q_lower][:limit]
 
 # ----------------- Async Wrapper for Blocking Operations -----------------
 async def run_qa_chain(qa_chain, query_text: str):
@@ -712,7 +769,7 @@ async def query_assistant(request: Request, question: str, lang: str = "EN"):
         query_text = corrected
 
         # Get documents and apply smart context truncation
-        docs = retriever.get_relevant_documents(query_text)
+        docs = retriever.invoke(query_text)
         contexts = [d.page_content for d in docs]
         
         # Apply smart context truncation
@@ -725,27 +782,24 @@ async def query_assistant(request: Request, question: str, lang: str = "EN"):
                 docs[i].page_content = ctx
 
         # Create QA chain with truncated contexts
-       
-        qa_chain = load_qa_chain(
-        llm=llm,
-        chain_type="stuff",
-        prompt=prompt_template_de if lang.upper() == "DE" else prompt_template)
-    
-
+        qa_chain = create_stuff_documents_chain(
+            llm=llm,
+            prompt=prompt_template_de if lang.upper() == "DE" else prompt_template
+        )
 
         # Execute QA chain
         start_time = time.time()
         res = await asyncio.wait_for(
             asyncio.get_event_loop().run_in_executor(
                 thread_pool, 
-                lambda: qa_chain({"input_documents": docs, "question": query_text})
+                lambda: qa_chain.invoke({"context": docs, "question": query_text})
             ), 
             timeout=60.0
         )
         processing_time = time.time() - start_time
         
         # Process results
-        answer = res["output_text"]
+        answer = res  # The new chain returns the answer directly
         
         # Calculate token usage
         token_usage["input"]["prompt_template"] = count_tokens(prompt_template.template)
@@ -851,11 +905,6 @@ async def serve_image(path: str):
     except Exception as e:
         logger.error(f"Error serving image: {e}")
         raise HTTPException(status_code=500, detail="Failed to serve image")
-
-# ----------------- Cleanup on shutdown -----------------
-@app.on_event("shutdown")
-async def shutdown_event():
-    thread_pool.shutdown(wait=True)
 
 if __name__ == "__main__":
     import uvicorn

@@ -225,8 +225,9 @@ function switchLanguage(lang) {
      * Virtual list for efficient rendering of large suggestion lists
      */
   class VirtualSuggestionsList {
-    constructor(container) {
+    constructor(container, inputElement = null) {
       this.container = container;
+      this.inputElement = inputElement; // ADD THIS
       this.itemHeight = 44;
       this.visibleCount = Math.min(8, Math.floor(300 / this.itemHeight));
       this.scrollTop = 0;
@@ -281,7 +282,7 @@ function switchLanguage(lang) {
                                         <span class="suggestion-icon">🔍</span>
                                         <span class="suggestion-text">${this.highlightMatch(
                                           suggestion,
-                                          searchInput.value
+                                          this.inputElement ? this.inputElement.value : "" // CHANGE THIS
                                         )}</span>
                                     </div>`;
                           })
@@ -300,7 +301,7 @@ function switchLanguage(lang) {
                             <span class="suggestion-icon">🔍</span>
                             <span class="suggestion-text">${this.highlightMatch(
                               suggestion,
-                              searchInput.value
+                              this.inputElement ? this.inputElement.value : "" // CHANGE THIS
                             )}</span>
                         </div>`;
         })
@@ -491,7 +492,7 @@ function renderQuickHelp(suggestions) {
         document
           .querySelector(".search-wrapper")
           .appendChild(suggestionsDropdown);
-        virtualList = new VirtualSuggestionsList(suggestionsDropdown);
+        virtualList = new VirtualSuggestionsList(suggestionsDropdown, searchInput);
         suggestionsDropdown.addEventListener("scroll", (e) => {
           virtualList.handleScroll(e.target.scrollTop);
         });
@@ -517,7 +518,7 @@ function renderQuickHelp(suggestions) {
         document
           .querySelector(".chat-input-container")
           .appendChild(chatSuggestionsDropdown);
-        chatVirtualList = new VirtualSuggestionsList(chatSuggestionsDropdown);
+        chatVirtualList = new VirtualSuggestionsList(chatSuggestionsDropdown, chatInput);
         chatSuggestionsDropdown.addEventListener("scroll", (e) => {
           chatVirtualList.handleScroll(e.target.scrollTop);
         });
@@ -667,7 +668,6 @@ function renderQuickHelp(suggestions) {
       scrollToBottom();
     }, 100);
   }
-
   function addChatMessage(question) {
     if (isAnswerLoading) return;
 
@@ -681,16 +681,17 @@ function renderQuickHelp(suggestions) {
     messageElement.className = "chat-message";
     messageElement.id = messageId;
 
-    const isImageRequest =
-      /\b(?:image|picture|photo|illustration|draw|render)\b/i.test(question);
+    const isImageRequest = 
+      /\b(?:image|picture|photo|illustration|draw|render|bild|foto|zeichnung|abbildung)\b/i.test(question);
+    
+    // Language-specific messages
     const headerIcon = isImageRequest ? "🖼️" : "✨";
     const headerLabel = isImageRequest
-    ? (currentLanguage === 'DE' ? 'Bild wird erstellt' : 'Creating your image')
-    : (currentLanguage === 'DE' ? 'Antwort' : 'Answer');
+        ? (currentLanguage === 'DE' ? 'Bildgenerierung' : 'Creating your image')
+        : (currentLanguage === 'DE' ? 'Antwort' : 'Answer');
     const loadingMessage = isImageRequest
-    ? (currentLanguage === 'DE' ? 'Einen Moment bitte, Ihr Bild wird erstellt…' : 'Hang tight, your image is being crafted…')
-    : (currentLanguage === 'DE' ? 'Ich suche die beste Antwort für Sie…' : 'Finding the best answer for you…');
-
+        ? (currentLanguage === 'DE' ? 'Einen Moment bitte, Ihr Bild wird erstellt...' : 'Hang tight, your image is being crafted...')
+        : (currentLanguage === 'DE' ? 'Ich suche die beste Antwort für Sie...' : 'Finding the best answer for you...');
 
     messageElement.innerHTML = `
         <div class="question-display">${question}</div>
@@ -701,7 +702,6 @@ function renderQuickHelp(suggestions) {
                 ${
                   isImageRequest
                     ? `<button aria-label="${currentLanguage === 'DE' ? 'Generierung stoppen' : 'Stop generation'}" class="stop-generation-btn" onclick="stopGeneration('${messageId}')">
-
                         <svg viewBox="0 0 24 24" width="16" height="16">
                             <rect x="8" y="8" width="8" height="8" fill="currentColor" rx="2"/>
                         </svg>
@@ -723,7 +723,7 @@ function renderQuickHelp(suggestions) {
     setTimeout(() => {
       scrollToBottom();
     }, 100);
-  }
+}
 
     /**
      * Fetch answer for a chat message
