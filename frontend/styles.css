@@ -1,4 +1,33 @@
-/* Reset and Base Styles */
+/* ============================================================================
+   ARENA2036 HELP CENTER - MAIN STYLESHEET
+   ============================================================================
+   
+   Table of Contents:
+   1. Reset and Base Styles
+   2. Header and Navigation
+   3. Language Switcher
+   4. Hero Section
+   5. Search Components
+   6. Quick Help Tags
+   7. Chat Flow System
+   8. Message Components
+   9. Answer Display
+   10. Loading States
+   11. Autocomplete & Suggestions
+   12. Related Questions
+   13. Feedback System
+   14. Sources Display
+   15. Image Display
+   16. Input States and Controls
+   17. Animations and Keyframes
+   18. Responsive Design
+   
+   ============================================================================ */
+
+/* ============================================================================
+   1. RESET AND BASE STYLES
+   ============================================================================ */
+
 * {
     margin: 0;
     padding: 0;
@@ -13,7 +42,10 @@ body {
     padding-bottom: 120px; /* Space for fixed chat input */
 }
 
-/* Header */
+/* ============================================================================
+   2. HEADER AND NAVIGATION
+   ============================================================================ */
+
 .header {
     background-color: #fff;
     border-bottom: 1px solid #e1e3e5;
@@ -62,6 +94,63 @@ body {
     font-weight: 600;
 }
 
+/* ============================================================================
+   3. LANGUAGE SWITCHER
+   ============================================================================ */
+
+.language-switcher {
+    display: flex;
+    align-items: center;        /* vertical center with logo */
+    justify-content: flex-end;
+    gap: 8px;
+    margin: 0;                  /* avoid extra vertical spacing */
+    margin-right: 6px;          /* small space from right corner */
+}
+
+/* ensure language buttons line up with header items */
+.lang-btn {
+    padding: 8px 14px;
+    border: 2px solid #e1e3e5;
+    background: white;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    color: #4b5563;
+    transition: all 0.15s ease;
+    min-width: 44px;
+    height: 40px;               /* consistent height for alignment */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;             /* ensures centered label */
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.lang-btn:hover {
+    border-color: #F28C38;
+    background-color: #fff5f0;
+    color: #F28C38;
+    transform: translateY(-1px);
+}
+
+.lang-btn.active {
+    background: linear-gradient(135deg, #F28C38 0%, #ff9f47 100%);
+    color: white;
+    border-color: #F28C38;
+    box-shadow: 0 4px 12px rgba(242, 140, 56, 0.3);
+}
+
+.lang-btn.active:hover {
+    background: linear-gradient(135deg, #e07a2b 0%, #f2913d 100%);
+    transform: translateY(-1px);
+}
+
+/* ============================================================================
+   4. HERO SECTION
+   ============================================================================ */
+
 /* Main Content */
 .main {
     min-height: calc(100vh - 64px);
@@ -88,6 +177,10 @@ body {
     letter-spacing: -0.02em;
     transition: all 0.3s ease;
 }
+
+/* ============================================================================
+   5. SEARCH COMPONENTS
+   ============================================================================ */
 
 /* Search Container */
 .search-container {
@@ -161,6 +254,10 @@ body {
     transform: translateY(-50%) scale(0.95);
 }
 
+/* ============================================================================
+   6. QUICK HELP TAGS
+   ============================================================================ */
+
 /* Quick Help Tags */
 .quick-help {
     display: flex;
@@ -192,6 +289,10 @@ body {
     box-shadow: 0 4px 12px rgba(242, 140, 56, 0.2);
 }
 
+/* ============================================================================
+   7. CHAT FLOW SYSTEM
+   ============================================================================ */
+
 /* Chat Flow Section */
 .chat-flow {
     background-color: #f7f9fc;
@@ -211,6 +312,74 @@ body {
     gap: 24px;
     margin-bottom: 120px;
 }
+
+/* Fixed Chat Input */
+.fixed-chat-input {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(180deg, rgba(247, 249, 252, 0) 0%, rgba(247, 249, 252, 0.95) 20%, rgba(247, 249, 252, 1) 100%);
+    padding: 20px 24px 24px;
+    z-index: 50;
+    backdrop-filter: blur(10px);
+}
+
+.chat-input-container {
+    position: relative;
+    max-width: 900px;
+    margin: 0 auto;
+    display: flex;
+    gap: 12px;
+    background: white;
+    border: 2px solid #e1e3e5;
+    border-radius: 16px;
+    padding: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+.chat-input {
+    flex: 1;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    outline: none;
+    background: transparent;
+    color: #1a1a1a;
+}
+
+.chat-input::placeholder {
+    color: #9ca3af;
+}
+
+.chat-send-button {
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg, #F28C38 0%, #ff9f47 100%);
+    border: none;
+    border-radius: 12px;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.chat-send-button:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 16px rgba(242, 140, 56, 0.4);
+}
+
+.chat-send-button:active {
+    transform: scale(0.95);
+}
+
+/* ============================================================================
+   8. MESSAGE COMPONENTS
+   ============================================================================ */
 
 /* Chat Message Box */
 .chat-message {
@@ -265,6 +434,10 @@ body {
     opacity: 0.3;
 }
 
+/* ============================================================================
+   9. ANSWER DISPLAY
+   ============================================================================ */
+
 /* Answer Section */
 .answer-section {
     margin-top: 16px;
@@ -290,42 +463,6 @@ body {
     color: #1a1a1a;
     font-size: 16px;
     flex: 1;
-}
-
-/* Loading State */
-.loading-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 40px 20px;
-    position: relative;
-}
-
-.loading-spinner {
-    width: 32px;
-    height: 32px;
-    border: 3px solid #e1e3e5;
-    border-radius: 50%;
-    border-top-color: #F28C38;
-    animation: spin 1s linear infinite;
-    margin-bottom: 16px;
-}
-
-.loading-text {
-    color: #6b7280;
-    font-size: 14px;
-    animation: pulse 2s ease-in-out infinite;
-}
-
-@keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; }
 }
 
 /* Answer Content */
@@ -447,236 +584,39 @@ body {
     color: white;
     font-weight: 600;
 }
-/* Add to styles.css after .answer-content styles */
-.answer-content img {
-    max-width: 100%;
-    height: auto;
-    border-radius: 8px;
-    margin-bottom: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
 
-/* Sources Section */
-.sources-section {
-    margin-top: 20px;
-    padding-top: 20px;
-    border-top: 2px solid #f1f3f4;
-}
+/* ============================================================================
+   10. LOADING STATES
+   ============================================================================ */
 
-.sources-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: #6b7280;
-    margin-bottom: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.sources-title::before {
-    content: '🔗';
-    font-size: 16px;
-}
-
-.sources-list {
+/* Loading State */
+.loading-state {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-}
-
-.source-item {
-    display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    border: 1px solid #e1e3e5;
-    border-radius: 8px;
-    text-decoration: none;
-    color: #4b5563;
-    font-size: 14px;
-    transition: all 0.2s ease;
-}
-
-.source-item:hover {
-    background: linear-gradient(135deg, #F28C38 0%, #ff9f47 100%);
-    color: white;
-    transform: translateX(4px);
-    box-shadow: 0 4px 12px rgba(242, 140, 56, 0.3);
-}
-
-.source-icon {
-    font-size: 14px;
-    flex-shrink: 0;
-}
-
-/* Answer Feedback */
-.answer-feedback {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-top: 20px;
-    padding-top: 16px;
-    border-top: 2px solid #f1f3f4;
-}
-
-.feedback-text {
-    font-size: 14px;
-    color: #6b7280;
-    font-weight: 500;
-}
-
-.feedback-buttons {
-    display: flex;
-    gap: 8px;
-}
-
-.feedback-btn {
-    width: 38px;
-    height: 38px;
-    border: 2px solid #e1e3e5;
-    border-radius: 10px;
-    background-color: #fff;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
-    transition: all 0.2s ease;
-}
-
-.feedback-btn:hover {
-    border-color: #F28C38;
-    background-color: #fff5f0;
-    transform: scale(1.1);
-}
-
-.feedback-btn.active {
-    background: linear-gradient(135deg, #F28C38 0%, #ff9f47 100%);
-    border-color: #F28C38;
-    color: white;
-}
-
-/* Fixed Chat Input */
-.fixed-chat-input {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: linear-gradient(180deg, rgba(247, 249, 252, 0) 0%, rgba(247, 249, 252, 0.95) 20%, rgba(247, 249, 252, 1) 100%);
-    padding: 20px 24px 24px;
-    z-index: 50;
-    backdrop-filter: blur(10px);
-}
-
-.chat-input-container {
+    padding: 40px 20px;
     position: relative;
-    max-width: 900px;
-    margin: 0 auto;
-    display: flex;
-    gap: 12px;
-    background: white;
-    border: 2px solid #e1e3e5;
-    border-radius: 16px;
-    padding: 8px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
 }
 
-.chat-input {
-    flex: 1;
-    padding: 12px 20px;
-    border: none;
-    border-radius: 12px;
-    font-size: 16px;
-    outline: none;
-    background: transparent;
-    color: #1a1a1a;
-}
-
-.chat-input::placeholder {
-    color: #9ca3af;
-}
-
-.chat-send-button {
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg, #F28C38 0%, #ff9f47 100%);
-    border: none;
-    border-radius: 12px;
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-}
-
-.chat-send-button:hover {
-    transform: scale(1.05);
-    box-shadow: 0 4px 16px rgba(242, 140, 56, 0.4);
-}
-
-.chat-send-button:active {
-    transform: scale(0.95);
-}
-
-/* Related Questions Section */
-.related-questions-section {
-    margin-top: 40px;
-    padding: 24px;
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    border-radius: 16px;
-    border: 1px solid #e1e3e5;
-}
-
-.related-title {
-    font-size: 20px;
-    font-weight: 600;
-    color: #1a1a1a;
+.loading-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid #e1e3e5;
+    border-radius: 50%;
+    border-top-color: #F28C38;
+    animation: spin 1s linear infinite;
     margin-bottom: 16px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
 }
 
-.related-title::before {
-    content: '💡';
-    font-size: 20px;
+.loading-text {
+    color: #6b7280;
+    font-size: 14px;
+    animation: pulse 2s ease-in-out infinite;
 }
 
-.related-questions-list {
-    display: grid;
-    gap: 12px;
-}
-
-.related-question {
-    background: white;
-    border: 1px solid #e1e3e5;
-    border-radius: 12px;
-    padding: 16px 20px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 15px;
-    color: #4b5563;
-    text-align: left;
-    font-weight: 500;
-}
-
-.related-question:hover {
-    border-color: #F28C38;
-    background: linear-gradient(135deg, #fff5f0 0%, #fef7f0 100%);
-    color: #1a1a1a;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 16px rgba(242, 140, 56, 0.15);
-}
-
-.related-question::before {
-    content: "❓";
-    margin-right: 12px;
-}
+/* ============================================================================
+   11. AUTOCOMPLETE & SUGGESTIONS
+   ============================================================================ */
 
 /* Enhanced Autocomplete Suggestions */
 .suggestions-dropdown {
@@ -818,6 +758,193 @@ body {
     text-align: center;
 }
 
+/* ============================================================================
+   12. RELATED QUESTIONS
+   ============================================================================ */
+
+/* Related Questions Section */
+.related-questions-section {
+    margin-top: 40px;
+    padding: 24px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 16px;
+    border: 1px solid #e1e3e5;
+}
+
+.related-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.related-title::before {
+    content: '💡';
+    font-size: 20px;
+}
+
+.related-questions-list {
+    display: grid;
+    gap: 12px;
+}
+
+.related-question {
+    background: white;
+    border: 1px solid #e1e3e5;
+    border-radius: 12px;
+    padding: 16px 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 15px;
+    color: #4b5563;
+    text-align: left;
+    font-weight: 500;
+}
+
+.related-question:hover {
+    border-color: #F28C38;
+    background: linear-gradient(135deg, #fff5f0 0%, #fef7f0 100%);
+    color: #1a1a1a;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(242, 140, 56, 0.15);
+}
+
+.related-question::before {
+    content: "❓";
+    margin-right: 12px;
+}
+
+/* ============================================================================
+   13. FEEDBACK SYSTEM
+   ============================================================================ */
+
+/* Answer Feedback */
+.answer-feedback {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 2px solid #f1f3f4;
+}
+
+.feedback-text {
+    font-size: 14px;
+    color: #6b7280;
+    font-weight: 500;
+}
+
+.feedback-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.feedback-btn {
+    width: 38px;
+    height: 38px;
+    border: 2px solid #e1e3e5;
+    border-radius: 10px;
+    background-color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    transition: all 0.2s ease;
+}
+
+.feedback-btn:hover {
+    border-color: #F28C38;
+    background-color: #fff5f0;
+    transform: scale(1.1);
+}
+
+.feedback-btn.active {
+    background: linear-gradient(135deg, #F28C38 0%, #ff9f47 100%);
+    border-color: #F28C38;
+    color: white;
+}
+
+/* ============================================================================
+   14. SOURCES DISPLAY
+   ============================================================================ */
+
+/* Sources Section */
+.sources-section {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 2px solid #f1f3f4;
+}
+
+.sources-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #6b7280;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sources-title::before {
+    content: '🔗';
+    font-size: 16px;
+}
+
+.sources-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.source-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border: 1px solid #e1e3e5;
+    border-radius: 8px;
+    text-decoration: none;
+    color: #4b5563;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.source-item:hover {
+    background: linear-gradient(135deg, #F28C38 0%, #ff9f47 100%);
+    color: white;
+    transform: translateX(4px);
+    box-shadow: 0 4px 12px rgba(242, 140, 56, 0.3);
+}
+
+.source-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+/* ============================================================================
+   15. IMAGE DISPLAY
+   ============================================================================ */
+
+/* Add to styles.css after .answer-content styles */
+.answer-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* ============================================================================
+   16. INPUT STATES AND CONTROLS
+   ============================================================================ */
+
 /* Stop Generation Button */
 .stop-generation-btn {
     background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
@@ -897,58 +1024,38 @@ body {
     transform: none !important;
     box-shadow: none !important;
 }
-/* Language Switcher Styles - Add this to your styles.css */
-.language-switcher {
-    display: flex;
-    align-items: center;        /* vertical center with logo */
-    justify-content: flex-end;
-    gap: 8px;
-    margin: 0;                  /* avoid extra vertical spacing */
-    margin-right: 6px;          /* small space from right corner */
+/* ============================================================================
+   17. ANIMATIONS AND KEYFRAMES
+   ============================================================================ */
+
+/* Small caret effect for typewriter areas (not used by JS directly, but can be toggled) */
+.typewriter-caret {
+    display: inline-block;
+    width: 10px;
+    height: 1.2em;
+    margin-left: 6px;
+    background: linear-gradient(90deg, #F28C38, #ff9f47);
+    animation: caret-blink 1s steps(2, start) infinite;
+    vertical-align: middle;
+    border-radius: 2px;
 }
 
-/* ensure language buttons line up with header items */
-.lang-btn {
-    padding: 8px 14px;
-    border: 2px solid #e1e3e5;
-    background: white;
-    border-radius: 8px;
-    cursor: pointer;
-    font-weight: 600;
-    font-size: 14px;
-    color: #4b5563;
-    transition: all 0.15s ease;
-    min-width: 44px;
-    height: 40px;               /* consistent height for alignment */
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;             /* ensures centered label */
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+@keyframes caret-blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
 }
 
-
-.lang-btn:hover {
-    border-color: #F28C38;
-    background-color: #fff5f0;
-    color: #F28C38;
-    transform: translateY(-1px);
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
-.lang-btn.active {
-    background: linear-gradient(135deg, #F28C38 0%, #ff9f47 100%);
-    color: white;
-    border-color: #F28C38;
-    box-shadow: 0 4px 12px rgba(242, 140, 56, 0.3);
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
 }
 
-.lang-btn.active:hover {
-    background: linear-gradient(135deg, #e07a2b 0%, #f2913d 100%);
-    transform: translateY(-1px);
-}
-
-/* Animations */
 @keyframes slideUp {
     from {
         opacity: 0;
@@ -971,7 +1078,10 @@ body {
     }
 }
 
-/* Responsive Design */
+/* ============================================================================
+   18. RESPONSIVE DESIGN
+   ============================================================================ */
+
 @media (max-width: 768px) {
     .header-container {
         padding: 0 10px;      /* slightly smaller side padding */
@@ -1052,7 +1162,8 @@ body {
         width: 14px;
         height: 14px;
     }
-     .language-switcher {
+    
+    .language-switcher {
         margin-bottom: 0; /* Remove this if it exists */
     }
     
@@ -1070,11 +1181,12 @@ body {
         height: 52px;
         gap: 8px;
     }
+    
     .hero-title {
         font-size: 28px;
     }
 
-     /* keep the text, but reduce size to avoid wrapping */
+    /* keep the text, but reduce size to avoid wrapping */
     .logo-text {
         font-size: 14px;
         overflow: hidden;
@@ -1098,12 +1210,13 @@ body {
         margin-right: 6px;
     }
 
-     .lang-btn {
+    .lang-btn {
         padding: 5px 8px;
         font-size: 12px;
         min-width: 36px;
         height: 32px;
     }
+    
     .chat-suggestions-dropdown {
         left: 6px;
         right: 6px;
@@ -1115,6 +1228,7 @@ body {
         font-size: 10px;
     }
 }
+
 @media (max-width: 360px) {
     .logo-text { font-size: 13px; }
     .logo-image { height: 22px; }

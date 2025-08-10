@@ -38,7 +38,6 @@ function switchLanguage(lang) {
     
     // Update UI text elements
     const elementsToUpdate = [
-        { selector: '.hero-title', attr: `data-${lang.toLowerCase()}` },
         { selector: '.logo-text', attr: `data-${lang.toLowerCase()}` },
         { element: searchInput, attr: `data-placeholder-${lang.toLowerCase()}` },
         { element: chatInput, attr: `data-placeholder-${lang.toLowerCase()}` }
@@ -52,6 +51,9 @@ function switchLanguage(lang) {
           if (el) el.textContent = el.getAttribute(item.attr) || '';
         }
     }); 
+
+    // Update hero title with time-based greeting
+    updateHeroTitle(lang);
     
     // Clear suggestions and reload quick help
     hideSuggestions();
@@ -72,6 +74,43 @@ function switchLanguage(lang) {
     
     // Clear search input if any
     searchInput.value = '';
+}
+/**
+ * Update hero title with time-based greeting
+ * @param {string} lang - Language code ('EN' or 'DE')
+ */
+function updateHeroTitle(lang) {
+    const heroTitle = document.querySelector('.hero-title');
+    if (!heroTitle) return;
+    
+    const now = new Date();
+    const hour = now.getHours();
+    
+    let greeting;
+    
+    if (lang === 'DE') {
+        if (hour >= 5 && hour < 12) {
+            greeting = 'Guten Morgen! Wie können wir helfen?';
+        } else if (hour >= 12 && hour < 18) {
+            greeting = 'Guten Tag! Wie können wir helfen?';
+        } else if (hour >= 18 && hour < 22) {
+            greeting = 'Guten Abend! Wie können wir helfen?';
+        } else {
+            greeting = 'Gute Nacht! Wie können wir helfen?';
+        }
+    } else {
+        if (hour >= 5 && hour < 12) {
+            greeting = 'Good morning! How can we help?';
+        } else if (hour >= 12 && hour < 18) {
+            greeting = 'Good afternoon! How can we help?';
+        } else if (hour >= 18 && hour < 22) {
+            greeting = 'Good evening! How can we help?';
+        } else {
+            greeting = 'Good night! How can we help?';
+        }
+    }
+    
+    heroTitle.textContent = greeting;
 }
 
     // ----------------- Marked.js Configuration -----------------
@@ -668,7 +707,7 @@ function renderQuickHelp(suggestions) {
       scrollToBottom();
     }, 100);
   }
-  function addChatMessage(question) {
+function addChatMessage(question) {
     if (isAnswerLoading) return;
 
     messageCounter++;
@@ -681,16 +720,22 @@ function renderQuickHelp(suggestions) {
     messageElement.className = "chat-message";
     messageElement.id = messageId;
 
-    // Remove the isImageRequest check - show stop button for all responses
-    const headerIcon = "✨";
-    const headerLabel = currentLanguage === 'DE' ? 'Antwort' : 'Answer';
-    const loadingMessage = currentLanguage === 'DE' 
-        ? 'Ich suche die beste Antwort für Sie...' 
-        : 'Finding the best answer for you...';
+    // Detect image requests (now includes German keywords)
+    const isImageRequest = 
+        /\b(?:image|picture|photo|illustration|draw|render|bild|foto|zeichnung|abbildung)\b/i.test(question);
+
+    // Set messages based on language and request type
+    const headerIcon = isImageRequest ? "🖼️" : "✨";
+    const headerLabel = isImageRequest
+        ? (currentLanguage === 'DE' ? 'Bild wird erstellt' : 'Creating your image')
+        : (currentLanguage === 'DE' ? 'Antwort' : 'Answer');
+    const loadingMessage = isImageRequest
+        ? (currentLanguage === 'DE' ? 'Einen Moment bitte, Ihr Bild wird erstellt...' : 'Hang tight, your image is being crafted...')
+        : (currentLanguage === 'DE' ? 'Ich suche die beste Antwort für Sie...' : 'Finding the best answer for you...');
 
     messageElement.innerHTML = `
         <div class="question-display">${question}</div>
-        <div class="answer-section">
+        <div class="answer-section ${isImageRequest ? "image-mode" : ""}">
             <div class="answer-header">
                 <span class="answer-icon">${headerIcon}</span>
                 <span class="answer-label">${headerLabel}</span>
@@ -719,204 +764,390 @@ function renderQuickHelp(suggestions) {
      * @param {string} question - User's question
      * @param {string} messageId - DOM element ID of the message
      */
-  const fetchAnswerForMessage = async (question, messageId) => {
-    const messageElement = document.getElementById(messageId);
-    if (!messageElement) {
+const fetchAnswerForMessage = async (question, messageId) => {
+  const messageElement = document.getElementById(messageId);
+  if (!messageElement) {
     console.warn('Message element removed before response', messageId);
     return;
+  }
+  const answerSection = messageElement.querySelector(".answer-section");
+
+  // create per-request abort controller and keep it global (re-used by stopGeneration)
+  currentAbortController = new AbortController();
+  const signal = currentAbortController.signal;
+
+  try {
+    const response = await fetch(
+      `http://localhost:8000/query?question=${encodeURIComponent(question)}&lang=${currentLanguage}`,
+      { signal }
+    );
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
-    const answerSection = messageElement.querySelector(".answer-section");
 
+    const data = await response.json();
 
-    currentAbortController = new AbortController();
+    // if it is an image, renderAnswerInMessage will handle it (it returns a Promise)
+    await renderAnswerInMessage(
+      answerSection,
+      data.answer,
+      data.sources,
+      question,
+      data.is_image,
+      { signal, typingSpeed: 12, enableClickToSkip: true }
+    );
 
-    try {
-      const response = await fetch(
-        `http://localhost:8000/query?question=${encodeURIComponent(
-          question
-        )}&lang=${currentLanguage}`,
-        {
-          signal: currentAbortController.signal,
-        }
-      );
+  } catch (error) {
+    if (error.name === "AbortError") {
+      const abortMd = currentLanguage === 'DE'
+        ? "## Generierung gestoppt\n\nDie Generierung wurde vom Benutzer abgebrochen."
+        : "## Answer Stopped\n\nGeneration was stopped by user.";
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      // render the abort message (await it so controller remains until render finishes)
+      await renderAnswerInMessage(answerSection, abortMd, [], question, false, { signal: null, typingSpeed: 0 });
+    } else {
+      console.error("Error:", error);
+      let errorMessage = currentLanguage === 'DE'
+        ? "Ich habe gerade Schwierigkeiten, eine Verbindung herzustellen. Bitte versuchen Sie es in einem Moment erneut."
+        : "I'm having trouble connecting right now. Please try again in a moment.";
+      if (error.message.includes("Failed to fetch")) {
+        errorMessage = currentLanguage === 'DE'
+          ? "Verbindung zum Server fehlgeschlagen. Bitte prüfen Sie Ihre Verbindung und versuchen Sie es erneut."
+          : "Unable to connect to the server. Please check your connection and try again.";
+      } else if (error.message.includes("500")) {
+        errorMessage = currentLanguage === 'DE'
+          ? "Der Server hat ein internes Problem festgestellt. Bitte versuchen Sie es später erneut."
+          : "The server encountered an internal error. Please try again later.";
       }
 
-      const data = await response.json();
-
-      // Check if response is an image
-      renderAnswerInMessage(
+      await renderAnswerInMessage(
         answerSection,
-        data.answer,
-        data.sources,
+        `## Error\n\n${errorMessage}`,
+        [],
         question,
-        data.is_image
+        false,
+        { signal: null, typingSpeed: 0 }
       );
-    } catch (error) {
-      if (error.name === "AbortError") {
-        const abortMd = currentLanguage === 'DE'
-          ? "## Generierung gestoppt\n\nDie Generierung wurde vom Benutzer abgebrochen."
-          : "## Answer Stopped\n\nGeneration was stopped by user.";
-
-        renderAnswerInMessage(
-          answerSection,
-          abortMd,
-          [],
-          question,
-          false
-        );
-      } else {
-        console.error("Error:", error);
-        let errorMessage = currentLanguage === 'DE'
-          ? "Ich habe gerade Schwierigkeiten, eine Verbindung herzustellen. Bitte versuchen Sie es in einem Moment erneut."
-          : "I'm having trouble connecting right now. Please try again in a moment.";
-        if (error.message.includes("Failed to fetch")) {
-           errorMessage = currentLanguage === 'DE'
-            ? "Verbindung zum Server fehlgeschlagen. Bitte prüfen Sie Ihre Verbindung und versuchen Sie es erneut."
-            : "Unable to connect to the server. Please check your connection and try again.";
-        } else if (error.message.includes("500")) {
-           errorMessage = currentLanguage === 'DE'
-           ? "Der Server hat ein internes Problem festgestellt. Bitte versuchen Sie es später erneut."
-           : "The server encountered an internal error. Please try again later.";
-
-        }
-        renderAnswerInMessage(
-          answerSection,
-          `## Error\n\n${errorMessage}`,
-          [],
-          question,
-          false
-        );
-      }
-    } finally {
-      isAnswerLoading = false;
-      currentAbortController = null;
-      updateInputStates();
     }
-  };
+  } finally {
+    // mark loading false only after rendering completes
+    isAnswerLoading = false;
+    currentAbortController = null;
+    updateInputStates();
+  }
+};
 
-    /**
-     * Render answer in message container
-     * @param {HTMLElement} answerSection - DOM element to render into
-     * @param {string} markdownText - Answer in markdown format
-     * @param {Array} sources - List of source objects
-     * @param {string} question - Original question
-     * @param {boolean} isImage - Whether answer is an image
-     */
-function renderAnswerInMessage(answerSection, markdownText, sources, question, isImage = false) {
-    let htmlContent;
-    
-    if (isImage) {
-    // Safe regex matches
+
+/**
+ * Render answer in message container (async because of typewriter)
+ * @param {HTMLElement} answerSection - DOM element to render into
+ * @param {string} markdownText - Answer in markdown format
+ * @param {Array} sources - List of source objects
+ * @param {string} question - Original question
+ * @param {boolean} isImage - Whether answer is an image
+ * @param {Object} opts - { signal: AbortSignal|null, typingSpeed: ms per char/token (optional), enableClickToSkip: bool (optional) }
+ */
+async function renderAnswerInMessage(answerSection, markdownText, sources, question, isImage = false, opts = {}) {
+  const ENABLE_CLICK_TO_SKIP = opts.enableClickToSkip ?? true;
+
+  // tuning
+  const CHAR_THRESHOLD = 3000; // if finalHtml length > this, use word mode
+  const CHAR_SPEED_MS = 8;     // ms per character (char mode)
+  const WORD_SPEED_MS = 30;    // ms per token (word mode) - tune to taste
+
+  // Clear any existing content and build answer header (synchronous)
+  answerSection.innerHTML = '';
+
+  const header = document.createElement('div');
+  header.className = 'answer-header';
+  header.innerHTML = `
+    <span class="answer-icon">✨</span>
+    <span class="answer-label">${currentLanguage === 'DE' ? 'Antwort' : 'Answer'}</span>
+  `;
+  answerSection.appendChild(header);
+
+  if (isImage) {
+    // Image handling (same logic as before, but allow external URLs or local paths)
     const imgMatch = markdownText && markdownText.match(/!\[.*\]\((.*?)\)/);
     const altMatch = markdownText && markdownText.match(/!\[(.*?)\]/);
-
-    const imgUrl = imgMatch ? imgMatch[1] : null;
+    const rawUrl = imgMatch ? imgMatch[1] : null;
     const altText = altMatch ? altMatch[1] : (currentLanguage === 'DE' ? 'Generiertes Bild' : 'Generated Image');
-    const imageHeader = currentLanguage === 'DE' ? 'Generiertes Bild' : 'Generated Image';
 
-    if (!imgUrl) {
-        // No URL found — show friendly localized message
-        answerSection.innerHTML = `<div class="answer-content"><p>${currentLanguage === 'DE' ? 'Kein Bild gefunden.' : 'No image URL found.'}</p></div>`;
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'answer-content';
+    answerSection.appendChild(contentDiv);
+
+    if (!rawUrl) {
+      contentDiv.innerHTML = `<p>${currentLanguage === 'DE' ? 'Kein Bild gefunden.' : 'No image URL found.'}</p>`;
+      scrollToBottom();
+      return;
+    }
+
+    // determine final image src: external URL/data URI used directly, otherwise call serve-image
+    let finalImgSrc;
+    if (/^data:/.test(rawUrl) || /^https?:\/\//i.test(rawUrl)) {
+      finalImgSrc = rawUrl;
+      contentDiv.innerHTML = `<img src="${finalImgSrc}" alt="${altText}" style="max-width:100%; border-radius:8px; margin-bottom:12px;"><p>${altText}</p>`;
+      scrollToBottom();
+      return;
+    } else {
+      // treat as backend path
+      const proxyUrl = `http://localhost:8000/serve-image?path=${encodeURIComponent(rawUrl)}`;
+      // show loading UI
+      contentDiv.innerHTML = `
+        <div class="loading-state">
+          <div class="loading-spinner"></div>
+          <p class="loading-text">${currentLanguage === 'DE' ? 'Bild wird geladen...' : 'Loading image...'}</p>
+        </div>
+      `;
+      scrollToBottom();
+      try {
+        const resp = await fetch(proxyUrl);
+        if (!resp.ok) throw new Error('Image fetch failed');
+        const blob = await resp.blob();
+        const reader = new FileReader();
+        const htmlAfter = await new Promise((resolve, reject) => {
+          reader.onloadend = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        contentDiv.innerHTML = `<img src="${htmlAfter}" alt="${altText}" style="max-width:100%; border-radius:8px; margin-bottom:12px;"><p>${altText}</p>`;
         scrollToBottom();
         return;
-    }
-
-    // Fetch image as blob and display (handle errors)
-    fetch(`http://localhost:8000/serve-image?path=${encodeURIComponent(imgUrl)}`)
-        .then(response => {
-        if (!response.ok) throw new Error('Image fetch failed');
-        return response.blob();
-        })
-        .then(blob => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            answerSection.innerHTML = `
-            <div class="answer-header">
-                <span class="answer-icon">🖼️</span>
-                <span class="answer-label">${imageHeader}</span>
-            </div>
-            <div class="answer-content">
-                <img src="${reader.result}" alt="${altText}" style="max-width: 100%; border-radius: 8px; margin-bottom: 12px;">
-                <p>${altText}</p>
-            </div>
-            `;
-            scrollToBottom();
-        };
-        reader.readAsDataURL(blob);
-        })
-        .catch(error => {
-        console.error("Image fetch error:", error);
-        answerSection.innerHTML = `<div class="answer-content"><p>${currentLanguage === 'DE' ? 'Fehler beim Laden des Bildes.' : 'Error loading image.'}</p></div>`;
+      } catch (err) {
+        console.error("Image fetch error:", err);
+        contentDiv.innerHTML = `<p>${currentLanguage === 'DE' ? 'Fehler beim Laden des Bildes.' : 'Error loading image.'}</p>`;
         scrollToBottom();
-        });
+        return;
+      }
+    }
+  }
 
-    // Important: return so the later `answerSection.innerHTML = htmlContent;` does not overwrite image content
-    return;
-    } else {
-        const parsedHtml = marked.parse(markdownText);
-        // Language-specific UI elements
-        const sourcesTitle = currentLanguage === 'DE' ? 'Quellen' : 'Sources';
-        const feedbackText = currentLanguage === 'DE' ? 'War diese Antwort hilfreich?' : 'Was this answer helpful?';
-        
-        htmlContent = `
-            <div class="answer-header">
-                <span class="answer-icon">✨</span>
-                <span class="answer-label">${currentLanguage === 'DE' ? 'Antwort' : 'Answer'}</span>
-            </div>
-            <div class="answer-content">${parsedHtml}</div>
-            ${sources && sources.length > 0 ? `
-                <div class="sources-section">
-                    <h4 class="sources-title">${sourcesTitle}</h4>
-                    <div class="sources-list">
-                        ${sources.map(source => `
-                            <a href="${source.url}" target="_blank" rel="noopener noreferrer" class="source-item">
-                                <span class="source-icon">🔗</span>
-                                <span class="source-title">${source.title || (currentLanguage === 'DE' ? 'Quelle' : 'Source')}</span>
-                            </a>
-                        `).join('')}
-                    </div>
-                </div>
-            ` : ''}
-            <div class="answer-feedback">
-                <span class="feedback-text">${feedbackText}</span>
-                <div class="feedback-buttons">
-                    <button class="feedback-btn feedback-yes" aria-label="${currentLanguage === 'DE' ? 'Hilfreich' : 'Helpful'}">👍</button>
-                    <button class="feedback-btn feedback-no" aria-label="${currentLanguage === 'DE' ? 'Nicht hilfreich' : 'Not helpful'}">👎</button>
+  // Non-image: convert markdown to HTML
+  const finalHtml = marked.parse(markdownText || '');
 
-                </div>
-            </div>
-        `;
-    }
-    
-    if (!isImage) {
-    answerSection.innerHTML = htmlContent;
-    }
-    
-    // Highlight code blocks for non-image responses
-    if (!isImage) {
-        answerSection.querySelectorAll('pre code').forEach((block) => {
-            hljs.highlightElement(block);
-        });
-    }
-    
-    // Language-specific loading message for related questions
-    const loadingText = currentLanguage === 'DE' 
-        ? 'Lade verwandte Fragen...' 
-        : 'Loading related questions...';
-    relatedQuestionsSection.style.display = "block";
-    relatedQuestionsList.innerHTML = `
-        <div class="loading-state">
-            <div class="loading-spinner"></div>
-            <p class="loading-text">${loadingText}</p>
+  // decide mode based on finalHtml length (characters)
+  const mode = (finalHtml.length > CHAR_THRESHOLD) ? 'word' : 'char';
+
+  // select speed: prioritize user-provided opts.typingSpeed if present
+  let speed;
+  if (typeof opts.typingSpeed === 'number') {
+    speed = opts.typingSpeed;
+  } else {
+    speed = (mode === 'char') ? CHAR_SPEED_MS : WORD_SPEED_MS;
+  }
+
+  // content container
+  const contentEl = document.createElement('div');
+  contentEl.className = 'answer-content';
+  contentEl.setAttribute('aria-live', 'polite');
+  answerSection.appendChild(contentEl);
+
+  // show related-questions loading UI (same UX)
+  relatedQuestionsSection.style.display = "block";
+  relatedQuestionsList.innerHTML = `
+    <div class="loading-state">
+      <div class="loading-spinner"></div>
+      <p class="loading-text">${currentLanguage === 'DE' ? 'Lade verwandte Fragen...' : 'Loading related questions...'}</p>
+    </div>
+  `;
+
+  try {
+    // call unified typewriter with selected mode and speed
+    await typewriteHtml(contentEl, finalHtml, { speed, signal: opts.signal ?? null, enableClickToSkip: ENABLE_CLICK_TO_SKIP, mode });
+
+    // append sources if present
+    if (sources && sources.length > 0) {
+      const sourcesSection = document.createElement('div');
+      sourcesSection.className = 'sources-section';
+      sourcesSection.innerHTML = `
+        <h4 class="sources-title">${currentLanguage === 'DE' ? 'Quellen' : 'Sources'}</h4>
+        <div class="sources-list">
+          ${sources.map(s => `
+            <a href="${s.url}" target="_blank" rel="noopener noreferrer" class="source-item">
+              <span class="source-icon">🔗</span>
+              <span class="source-title">${s.title || (currentLanguage === 'DE' ? 'Quelle' : 'Source')}</span>
+            </a>
+          `).join('')}
         </div>
+      `;
+      answerSection.appendChild(sourcesSection);
+    }
+
+    // feedback UI
+    const feedbackDiv = document.createElement('div');
+    feedbackDiv.className = 'answer-feedback';
+    feedbackDiv.innerHTML = `
+      <span class="feedback-text">${currentLanguage === 'DE' ? 'War diese Antwort hilfreich?' : 'Was this answer helpful?'}</span>
+      <div class="feedback-buttons">
+        <button class="feedback-btn feedback-yes" aria-label="${currentLanguage === 'DE' ? 'Hilfreich' : 'Helpful'}">👍</button>
+        <button class="feedback-btn feedback-no" aria-label="${currentLanguage === 'DE' ? 'Nicht hilfreich' : 'Not helpful'}">👎</button>
+      </div>
     `;
+    answerSection.appendChild(feedbackDiv);
+
+    // highlight code blocks after final HTML inserted
+    answerSection.querySelectorAll('pre code').forEach((block) => {
+      try { hljs.highlightElement(block); } catch (e) { /* ignore */ }
+    });
+
+    // wire feedback buttons
+    feedbackDiv.querySelectorAll('.feedback-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.parentNode.querySelectorAll('.feedback-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+
+    // load related questions asynchronously
     loadRelatedQuestions(question);
-    
+
     scrollToBottom();
+  } catch (err) {
+    if (err && (err.name === 'AbortError' || err.message === 'aborted')) {
+      // if aborted, reveal final content so user can read it
+      const abortNotice = document.createElement('div');
+      abortNotice.className = 'answer-content';
+      abortNotice.innerHTML = `<blockquote>${currentLanguage === 'DE' ? 'Die Ausgabe wurde gestoppt.' : 'Output was stopped.'}</blockquote>`;
+      answerSection.appendChild(abortNotice);
+      const fullReveal = document.createElement('div');
+      fullReveal.className = 'answer-content';
+      fullReveal.innerHTML = finalHtml;
+      answerSection.appendChild(fullReveal);
+
+      answerSection.querySelectorAll('pre code').forEach((block) => {
+        try { hljs.highlightElement(block); } catch (e) { /* ignore */ }
+      });
+      scrollToBottom();
+    } else {
+      console.error('Error during typewriting:', err);
+      const errDiv = document.createElement('div');
+      errDiv.className = 'answer-content';
+      errDiv.innerHTML = `<p>${currentLanguage === 'DE' ? 'Fehler beim Anzeigen der Antwort.' : 'Error rendering the answer.'}</p>`;
+      answerSection.appendChild(errDiv);
+      scrollToBottom();
+    }
+  }
 }
+
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Typewrite HTML string into a container while preserving tags.
+ * Supports two modes:
+ *   - 'char' : reveals characters one-by-one (original behaviour)
+ *   - 'word' : reveals tokens (words + whitespace) one token at a time (much faster for long text)
+ *
+ * @param {HTMLElement} container
+ * @param {string} htmlString
+ * @param {Object} opts - { speed: ms per char/token, signal: AbortSignal|null, enableClickToSkip: bool, mode: 'char'|'word' }
+ */
+async function typewriteHtml(container, htmlString, opts = {}) {
+  const {
+    speed = 12,
+    signal = null,
+    enableClickToSkip = true,
+    mode = 'char' // 'char' or 'word'
+  } = opts || {};
+
+  // Build DOM nodes with empty text nodes while preserving element structure
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(htmlString, 'text/html');
+  const sourceBody = doc.body;
+
+  const textNodes = []; // { tokens: Array<string>, targetNode: Text }
+
+  function cloneStructureWithEmptyText(srcNode, destParent) {
+    for (const child of Array.from(srcNode.childNodes)) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        const original = child.nodeValue || '';
+
+        // tokenize depending on mode
+        if (mode === 'char') {
+          // single token string; we'll iterate chars later
+          const tn = document.createTextNode('');
+          destParent.appendChild(tn);
+          textNodes.push({ tokens: [original], mode: 'char', targetNode: tn });
+        } else {
+          // mode === 'word': split into tokens that preserve whitespace
+          // regex splits into runs of non-whitespace or runs of whitespace
+          const tokens = original.match(/\s+|\S+/g) || [];
+          const tn = document.createTextNode('');
+          destParent.appendChild(tn);
+          textNodes.push({ tokens, mode: 'word', targetNode: tn });
+        }
+      } else if (child.nodeType === Node.ELEMENT_NODE) {
+        const el = document.createElement(child.tagName.toLowerCase());
+        for (const attr of Array.from(child.attributes || [])) {
+          el.setAttribute(attr.name, attr.value);
+        }
+        destParent.appendChild(el);
+        cloneStructureWithEmptyText(child, el);
+      } else {
+        // ignore other nodes (comments, etc.)
+      }
+    }
+  }
+
+  container.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+  cloneStructureWithEmptyText(sourceBody, fragment);
+  container.appendChild(fragment);
+
+  // click-to-skip logic
+  let skipRequested = false;
+  function onClickSkip() {
+    skipRequested = true;
+    container.removeEventListener('click', onClickSkip);
+  }
+  if (enableClickToSkip) {
+    container.addEventListener('click', onClickSkip);
+  }
+
+  // main reveal loop
+  for (const item of textNodes) {
+    if (signal && signal.aborted) {
+      throw new DOMException('aborted', 'AbortError');
+    }
+    if (skipRequested) {
+      container.innerHTML = htmlString;
+      return;
+    }
+
+    if (item.mode === 'char') {
+      const text = item.tokens[0];
+      // reveal by character
+      for (let i = 0; i < text.length; i++) {
+        if (signal && signal.aborted) throw new DOMException('aborted', 'AbortError');
+        if (skipRequested) {
+          container.innerHTML = htmlString;
+          return;
+        }
+        item.targetNode.data += text[i];
+        if (speed > 0) await sleep(speed);
+      }
+    } else {
+      // word mode: tokens already include whitespace tokens; reveal token-by-token
+      for (let t = 0; t < item.tokens.length; t++) {
+        if (signal && signal.aborted) throw new DOMException('aborted', 'AbortError');
+        if (skipRequested) {
+          container.innerHTML = htmlString;
+          return;
+        }
+        item.targetNode.data += item.tokens[t]; // append whole token (word or whitespace)
+        if (speed > 0) await sleep(speed);
+      }
+    }
+  }
+
+  // final safety: ensure container contains final HTML
+  container.innerHTML = htmlString;
+}
+
 
     // ----------------- Related Questions -----------------
     /**
@@ -1183,5 +1414,7 @@ function updateInputStates() {
 
     // ----------------- Initialization -----------------
     // Focus search input on page load
+  // Initialize hero title with time-based greeting
+  updateHeroTitle(currentLanguage);
   searchInput.focus();
 });
