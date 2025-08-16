@@ -18,3 +18,5 @@ arena_vector_database/
 models/
 
 generated_images/
+
+vector_db/

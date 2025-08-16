@@ -83,20 +83,23 @@ device = "cuda" if __import__('torch').cuda.is_available() else "cpu"
 
 embeddings_en = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-mpnet-base-v2",
-    model_kwargs={"device": device, "trust_remote_code": False}
+    model_kwargs={"device": device, "trust_remote_code": False},
+    encode_kwargs={"normalize_embeddings": True}
 )
 embeddings_de = HuggingFaceEmbeddings(
     model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
-    model_kwargs={"device": device, "trust_remote_code": False}
+    model_kwargs={"device": device, "trust_remote_code": False},
+    encode_kwargs={"normalize_embeddings": True}
+    
 )
 
 vectorstore_en = Chroma(
-    persist_directory="arena_vector_database",
+    persist_directory="vector_db",
     collection_name="arena2036_en",
     embedding_function=embeddings_en
 )
 vectorstore_de = Chroma(
-    persist_directory="arena_vector_database",
+    persist_directory="vector_db",
     collection_name="arena2036_de",
     embedding_function=embeddings_de
 )
