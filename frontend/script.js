@@ -798,47 +798,37 @@ const fetchAnswerForMessage = async (question, messageId) => {
       { signal, typingSpeed: 12, enableClickToSkip: true }
     );
 
-  } catch (err) {
-    if (err && (err.name === 'AbortError' || err.message === 'aborted')) {
-      // if aborted, reveal final content so user can read it
-      const abortNotice = document.createElement('div');
-      abortNotice.className = 'answer-content';
-      abortNotice.innerHTML = `<blockquote>${currentLanguage === 'DE' ? 'Die Ausgabe wurde gestoppt.' : 'Output was stopped.'}</blockquote>`;
-      answerSection.appendChild(abortNotice);
+  } catch (error) {
+    if (error.name === "AbortError") {
+      const abortMd = currentLanguage === 'DE'
+        ? "## Generierung gestoppt\n\nDie Generierung wurde vom Benutzer abgebrochen."
+        : "## Answer Stopped\n\nGeneration was stopped by user.";
 
-      const fullReveal = document.createElement('div');
-      fullReveal.className = 'answer-content';
-      fullReveal.innerHTML = finalHtml;
-      answerSection.appendChild(fullReveal);
-
-      answerSection.querySelectorAll('pre code').forEach((block) => {
-        try { hljs.highlightElement(block); } catch (e) { /* ignore */ }
-      });
-
-      // ensure the related-questions UI is visible (defensive)
-      relatedQuestionsSection.style.display = "block";
-      relatedQuestionsList.innerHTML = `
-        <div class="loading-state">
-          <div class="loading-spinner"></div>
-          <p class="loading-text">${currentLanguage === 'DE' ? 'Lade verwandte Fragen...' : 'Loading related questions...'}</p>
-        </div>
-      `;
-      scrollToBottom();
-
-      // --- NEW: trigger the related-questions endpoint when user aborts ---
-      try {
-        // call asynchronously and safely; errors are logged inside loadRelatedQuestions
-        loadRelatedQuestions(question);
-      } catch (e) {
-        console.warn('Failed to load related questions after abort:', e);
-      }
+      // render the abort message (await it so controller remains until render finishes)
+      await renderAnswerInMessage(answerSection, abortMd, [], question, false, { signal: null, typingSpeed: 0 });
     } else {
-      console.error('Error during typewriting:', err);
-      const errDiv = document.createElement('div');
-      errDiv.className = 'answer-content';
-      errDiv.innerHTML = `<p>${currentLanguage === 'DE' ? 'Fehler beim Anzeigen der Antwort.' : 'Error rendering the answer.'}</p>`;
-      answerSection.appendChild(errDiv);
-      scrollToBottom();
+      console.error("Error:", error);
+      let errorMessage = currentLanguage === 'DE'
+        ? "Ich habe gerade Schwierigkeiten, eine Verbindung herzustellen. Bitte versuchen Sie es in einem Moment erneut."
+        : "I'm having trouble connecting right now. Please try again in a moment.";
+      if (error.message.includes("Failed to fetch")) {
+        errorMessage = currentLanguage === 'DE'
+          ? "Verbindung zum Server fehlgeschlagen. Bitte prüfen Sie Ihre Verbindung und versuchen Sie es erneut."
+          : "Unable to connect to the server. Please check your connection and try again.";
+      } else if (error.message.includes("500")) {
+        errorMessage = currentLanguage === 'DE'
+          ? "Der Server hat ein internes Problem festgestellt. Bitte versuchen Sie es später erneut."
+          : "The server encountered an internal error. Please try again later.";
+      }
+
+      await renderAnswerInMessage(
+        answerSection,
+        `## Error\n\n${errorMessage}`,
+        [],
+        question,
+        false,
+        { signal: null, typingSpeed: 0 }
+      );
     }
   } finally {
     // mark loading false only after rendering completes
@@ -1021,6 +1011,7 @@ async function renderAnswerInMessage(answerSection, markdownText, sources, quest
       abortNotice.className = 'answer-content';
       abortNotice.innerHTML = `<blockquote>${currentLanguage === 'DE' ? 'Die Ausgabe wurde gestoppt.' : 'Output was stopped.'}</blockquote>`;
       answerSection.appendChild(abortNotice);
+
       const fullReveal = document.createElement('div');
       fullReveal.className = 'answer-content';
       fullReveal.innerHTML = finalHtml;
@@ -1029,7 +1020,24 @@ async function renderAnswerInMessage(answerSection, markdownText, sources, quest
       answerSection.querySelectorAll('pre code').forEach((block) => {
         try { hljs.highlightElement(block); } catch (e) { /* ignore */ }
       });
+
+      // ensure the related-questions UI is visible (defensive)
+      relatedQuestionsSection.style.display = "block";
+      relatedQuestionsList.innerHTML = `
+        <div class="loading-state">
+          <div class="loading-spinner"></div>
+          <p class="loading-text">${currentLanguage === 'DE' ? 'Lade verwandte Fragen...' : 'Loading related questions...'}</p>
+        </div>
+      `;
       scrollToBottom();
+
+      // --- NEW: trigger the related-questions endpoint when user aborts ---
+      try {
+        // call asynchronously and safely; errors are logged inside loadRelatedQuestions
+        loadRelatedQuestions(question);
+      } catch (e) {
+        console.warn('Failed to load related questions after abort:', e);
+      }
     } else {
       console.error('Error during typewriting:', err);
       const errDiv = document.createElement('div');
