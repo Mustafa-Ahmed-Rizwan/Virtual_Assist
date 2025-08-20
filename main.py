@@ -17,7 +17,9 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
 from langchain_groq import ChatGroq
-from langchain_chroma import Chroma
+# from langchain_chroma import Chroma
+from langchain_pinecone import PineconeVectorStore
+from pinecone import Pinecone
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import PromptTemplate
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -58,12 +60,15 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 load_dotenv()
-groq_api_key = os.getenv("GROQ_API_KEY")
+# groq_api_key = os.getenv("GROQ_API_KEY")
 openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-if not groq_api_key:
-    raise ValueError("GROQ_API_KEY not found in .env")
+# if not groq_api_key:
+#     raise ValueError("GROQ_API_KEY not found in .env")
 if not openrouter_api_key:
     logger.warning("OPENROUTER_API_KEY not found in .env; ChatOpenAI will remain commented out")
+pinecone_api_key = os.getenv("PINECONE_API_KEY")
+if not pinecone_api_key:
+    raise ValueError("PINECONE_API_KEY not found in .env")
 
 # ----------------- Thread Pool for Blocking Operations -----------------
 thread_pool = ThreadPoolExecutor(max_workers=4)
@@ -93,15 +98,24 @@ embeddings_de = HuggingFaceEmbeddings(
     
 )
 
-vectorstore_en = Chroma(
-    persist_directory="vector_db",
-    collection_name="arena2036_en",
-    embedding_function=embeddings_en
+# Initialize Pinecone
+pc = Pinecone(api_key=pinecone_api_key)
+
+# Connect to Pinecone indexes
+index_en = pc.Index("arena2036-en")
+index_de = pc.Index("arena2036-de")
+
+vectorstore_en = PineconeVectorStore(
+    index=index_en,
+    embedding=embeddings_en,
+    text_key="text",
+    namespace="en"
 )
-vectorstore_de = Chroma(
-    persist_directory="vector_db",
-    collection_name="arena2036_de",
-    embedding_function=embeddings_de
+vectorstore_de = PineconeVectorStore(
+    index=index_de,
+    embedding=embeddings_de,
+    text_key="text",
+    namespace="de"
 )
 logger.info("Vector stores loaded successfully")
 
@@ -128,27 +142,27 @@ temperature = float(os.getenv("LLM_TEMPERATURE", 0.0))
 max_tokens = int(os.getenv("LLM_MAX_TOKENS", 1024))
 
 # Groq-based LLM
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=groq_api_key,
-    temperature=temperature,
-    max_tokens=max_tokens,
-    model_kwargs={"top_p": 0.95},
-    timeout=60,
-    max_retries=3
-)
-
-# OpenRouter-based LLM (commented out)
-# llm = ChatOpenAI(
-#     model="mistralai/mistral-small-3.2-24b-instruct:free",
-#     api_key=openrouter_api_key,
-#     base_url="https://openrouter.ai/api/v1",
+# llm = ChatGroq(
+#     model="llama-3.3-70b-versatile",
+#     api_key=groq_api_key,
 #     temperature=temperature,
 #     max_tokens=max_tokens,
-#    model_kwargs={"top_p": 0.95},
+#     model_kwargs={"top_p": 0.95},
 #     timeout=60,
-#     max_retries=2
+#     max_retries=3
 # )
+
+# OpenRouter-based LLM (commented out)
+llm = ChatOpenAI(
+    model="mistralai/mistral-small-3.2-24b-instruct:free",
+    api_key=openrouter_api_key,
+    base_url="https://openrouter.ai/api/v1",
+    temperature=temperature,
+    max_tokens=max_tokens,
+   model_kwargs={"top_p": 0.95},
+    timeout=60,
+    max_retries=2
+)
 
 logger.info("LLM initialized successfully")
 
@@ -759,7 +773,7 @@ async def query_assistant(request: Request, question: str, lang: str = "EN"):
         # Setup retriever
         retriever = vectorstore.as_retriever(
             search_type="mmr",
-            search_kwargs={"k":3, "fetch_k":12, "lambda_mult":0.9}
+            search_kwargs={"k":5, "fetch_k":30, "lambda_mult":0.75}
         )
         
         # Typo correction
